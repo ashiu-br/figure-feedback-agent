@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BioRender Figure Feedback Agent</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <style>
+        .spinner {
+            border: 2px solid #f3f4f6;
+            border-top: 2px solid #3b82f6;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .score-bar {
+            height: 8px;
+            border-radius: 4px;
+            transition: width 0.5s ease-in-out;
+        }
+        .feedback-text {
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
+        .recommendation-card:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- Header -->
+        <div class="text-center mb-12">
+            <div class="flex items-center justify-center mb-4">
+                <i data-lucide="microscope" class="w-8 h-8 text-blue-600 mr-3"></i>
+                <h1 class="text-4xl font-bold text-gray-900">BioRender Figure Feedback Agent</h1>
+            </div>
+            <p class="text-xl text-gray-600 max-w-3xl mx-auto">
+                AI-powered analysis for scientific figure improvement. Get instant feedback on visual design, 
+                communication clarity, and scientific accuracy.
+            </p>
+        </div>
+
+        <!-- Upload Section -->
+        <div class="bg-white rounded-lg shadow-sm border p-8 mb-8">
+            <div class="flex items-center mb-6">
+                <i data-lucide="upload-cloud" class="w-6 h-6 text-blue-600 mr-3"></i>
+                <h2 class="text-2xl font-semibold text-gray-900">Upload Your Figure</h2>
+            </div>
+            
+            <form id="uploadForm" class="space-y-6">
+                <!-- File Uploads -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-2">
+                        <label for="imageFile" class="block text-sm font-medium text-gray-700">
+                            Figure Image (PNG/JPG) *
+                        </label>
+                        <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
+                            <input type="file" id="imageFile" accept="image/*" required
+                                   class="hidden" onchange="handleFileSelect(this, 'image-preview')">
+                            <label for="imageFile" class="cursor-pointer">
+                                <i data-lucide="image" class="w-8 h-8 text-gray-400 mx-auto mb-2"></i>
+                                <p class="text-sm text-gray-600">Click to upload figure image</p>
+                                <p class="text-xs text-gray-400 mt-1">PNG, JPG up to 10MB</p>
+                            </label>
+                            <div id="image-preview" class="mt-4 hidden">
+                                <img class="max-w-full h-32 object-contain mx-auto rounded" alt="Preview">
+                                <p class="text-sm text-green-600 mt-2">Image uploaded successfully</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-2">
+                        <label for="jsonFile" class="block text-sm font-medium text-gray-700">
+                            BioRender JSON Structure *
+                        </label>
+                        <div class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
+                            <input type="file" id="jsonFile" accept=".json" required
+                                   class="hidden" onchange="handleFileSelect(this, 'json-preview')">
+                            <label for="jsonFile" class="cursor-pointer">
+                                <i data-lucide="file-code" class="w-8 h-8 text-gray-400 mx-auto mb-2"></i>
+                                <p class="text-sm text-gray-600">Click to upload JSON structure</p>
+                                <p class="text-xs text-gray-400 mt-1">JSON files only</p>
+                            </label>
+                            <div id="json-preview" class="mt-4 hidden">
+                                <div class="bg-gray-100 p-2 rounded text-xs font-mono max-h-20 overflow-y-auto"></div>
+                                <p class="text-sm text-green-600 mt-2">JSON uploaded successfully</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Optional Context -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-2">
+                        <label for="context" class="block text-sm font-medium text-gray-700">
+                            Context (Optional)
+                        </label>
+                        <textarea id="context" rows="3" 
+                                  placeholder="Figure title, intended audience, publication target..."
+                                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"></textarea>
+                    </div>
+
+                    <div class="space-y-2">
+                        <label for="figureType" class="block text-sm font-medium text-gray-700">
+                            Figure Type (Optional)
+                        </label>
+                        <select id="figureType" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="">Select figure type...</option>
+                            <option value="pathway">Pathway Diagram</option>
+                            <option value="workflow">Experimental Workflow</option>
+                            <option value="mechanism">Disease Mechanism</option>
+                            <option value="timeline">Timeline/Process</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Submit Buttons -->
+                <div class="text-center space-x-4">
+                    <button type="submit" id="analyzeBtn" 
+                            class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-8 rounded-lg transition-colors inline-flex items-center">
+                        <i data-lucide="brain" class="w-5 h-5 mr-2"></i>
+                        Analyze Figure
+                    </button>
+                    <button type="button" id="demoBtn" 
+                            class="bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-8 rounded-lg transition-colors inline-flex items-center">
+                        <i data-lucide="play-circle" class="w-5 h-5 mr-2"></i>
+                        Try Demo
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Loading State -->
+        <div id="loadingState" class="bg-white rounded-lg shadow-sm border p-8 mb-8 hidden">
+            <div class="text-center">
+                <div class="spinner mx-auto mb-4"></div>
+                <h3 class="text-lg font-semibold text-gray-900 mb-2">Analyzing Your Figure</h3>
+                <p class="text-gray-600 mb-4">Our AI agents are evaluating visual design, communication clarity, and scientific accuracy...</p>
+                <div class="bg-gray-200 rounded-full h-2 w-full max-w-md mx-auto">
+                    <div class="bg-blue-600 h-2 rounded-full transition-all duration-1000" id="progressBar" style="width: 0%"></div>
+                </div>
+                <p class="text-sm text-gray-500 mt-2">This typically takes 10-15 seconds</p>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="resultsSection" class="hidden">
+            <!-- Score Overview -->
+            <div class="bg-white rounded-lg shadow-sm border p-8 mb-8">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center">
+                        <i data-lucide="bar-chart-3" class="w-6 h-6 text-blue-600 mr-3"></i>
+                        <h2 class="text-2xl font-semibold text-gray-900">Quality Assessment</h2>
+                    </div>
+                    <div id="overallScore" class="text-3xl font-bold text-blue-600"></div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <!-- Visual Design Score -->
+                    <div class="text-center p-4 border rounded-lg">
+                        <div class="flex items-center justify-center mb-2">
+                            <i data-lucide="palette" class="w-5 h-5 text-purple-600 mr-2"></i>
+                            <h3 class="font-semibold text-gray-900">Visual Design</h3>
+                        </div>
+                        <div id="visualScore" class="text-2xl font-bold text-purple-600 mb-2">-</div>
+                        <div class="bg-gray-200 rounded-full h-2">
+                            <div id="visualBar" class="score-bar bg-purple-600" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Communication Score -->
+                    <div class="text-center p-4 border rounded-lg">
+                        <div class="flex items-center justify-center mb-2">
+                            <i data-lucide="message-circle" class="w-5 h-5 text-green-600 mr-2"></i>
+                            <h3 class="font-semibold text-gray-900">Communication</h3>
+                        </div>
+                        <div id="commScore" class="text-2xl font-bold text-green-600 mb-2">-</div>
+                        <div class="bg-gray-200 rounded-full h-2">
+                            <div id="commBar" class="score-bar bg-green-600" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Scientific Accuracy Score -->
+                    <div class="text-center p-4 border rounded-lg">
+                        <div class="flex items-center justify-center mb-2">
+                            <i data-lucide="flask" class="w-5 h-5 text-orange-600 mr-2"></i>
+                            <h3 class="font-semibold text-gray-900">Scientific Accuracy</h3>
+                        </div>
+                        <div id="sciScore" class="text-2xl font-bold text-orange-600 mb-2">-</div>
+                        <div class="bg-gray-200 rounded-full h-2">
+                            <div id="sciBar" class="score-bar bg-orange-600" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Content Summary -->
+            <div class="bg-blue-50 rounded-lg border border-blue-200 p-8 mb-8">
+                <div class="flex items-center mb-4">
+                    <i data-lucide="eye" class="w-6 h-6 text-blue-600 mr-3"></i>
+                    <h2 class="text-2xl font-semibold text-gray-900">What This Figure Shows</h2>
+                </div>
+                <p class="text-sm text-blue-700 mb-4">AI interpretation of your figure's content and message:</p>
+                <div id="contentSummary" class="text-gray-800 text-lg leading-relaxed bg-white p-4 rounded border"></div>
+            </div>
+
+            <!-- Detailed Feedback -->
+            <div class="bg-white rounded-lg shadow-sm border p-8 mb-8">
+                <div class="flex items-center mb-6">
+                    <i data-lucide="clipboard-list" class="w-6 h-6 text-blue-600 mr-3"></i>
+                    <h2 class="text-2xl font-semibold text-gray-900">Detailed Analysis</h2>
+                </div>
+                <div id="detailedFeedback" class="feedback-text text-gray-700 leading-relaxed"></div>
+            </div>
+
+            <!-- Recommendations -->
+            <div class="bg-white rounded-lg shadow-sm border p-8 mb-8">
+                <div class="flex items-center mb-6">
+                    <i data-lucide="lightbulb" class="w-6 h-6 text-blue-600 mr-3"></i>
+                    <h2 class="text-2xl font-semibold text-gray-900">Actionable Recommendations</h2>
+                </div>
+                <div id="recommendationsList" class="space-y-4"></div>
+            </div>
+
+            <!-- Processing Time -->
+            <div class="text-center text-sm text-gray-500 mb-4">
+                Analysis completed in <span id="processingTime">-</span> seconds
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="text-center space-x-4">
+                <button onclick="resetForm()" 
+                        class="bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-6 rounded-lg transition-colors">
+                    Analyze Another Figure
+                </button>
+                <button onclick="exportResults()" 
+                        class="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-6 rounded-lg transition-colors">
+                    Export Results
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        let analysisResults = null;
+
+        function handleFileSelect(input, previewId) {
+            const file = input.files[0];
+            const preview = document.getElementById(previewId);
+            
+            if (file) {
+                if (input.id === 'imageFile') {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const img = preview.querySelector('img');
+                        img.src = e.target.result;
+                        preview.classList.remove('hidden');
+                    };
+                    reader.readAsDataURL(file);
+                } else if (input.id === 'jsonFile') {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        try {
+                            const jsonData = JSON.parse(e.target.result);
+                            const codeDiv = preview.querySelector('div');
+                            codeDiv.textContent = JSON.stringify(jsonData, null, 2).substring(0, 200) + '...';
+                            preview.classList.remove('hidden');
+                        } catch (error) {
+                            alert('Invalid JSON file. Please select a valid BioRender JSON export.');
+                            input.value = '';
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            }
+        }
+
+        async function analyzeWithFiles() {
+            const imageFile = document.getElementById('imageFile').files[0];
+            const jsonFile = document.getElementById('jsonFile').files[0];
+            const context = document.getElementById('context').value;
+            const figureType = document.getElementById('figureType').value;
+            
+            if (!imageFile || !jsonFile) {
+                alert('Please upload both the figure image and JSON structure, or use the "Try Demo" button for a demonstration.');
+                return false;
+            }
+            
+            return await uploadAndAnalyze(imageFile, jsonFile, context, figureType);
+        }
+
+        async function analyzeDemo() {
+            // Create mock data for demo
+            const canvas = document.createElement('canvas');
+            canvas.width = 400;
+            canvas.height = 300;
+            const ctx = canvas.getContext('2d');
+            
+            // Draw a simple mock scientific figure
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, 400, 300);
+            
+            // Draw some shapes to represent a pathway
+            ctx.fillStyle = 'lightblue';
+            ctx.fillRect(50, 50, 100, 50);
+            ctx.fillStyle = 'lightgreen';  
+            ctx.fillRect(250, 150, 100, 50);
+            
+            // Add arrow
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(150, 75);
+            ctx.lineTo(250, 175);
+            ctx.stroke();
+            
+            // Add text
+            ctx.fillStyle = 'black';
+            ctx.font = '14px Arial';
+            ctx.fillText('Protein A', 60, 80);
+            ctx.fillText('Protein B', 260, 180);
+            ctx.fillText('Demo Pathway', 150, 30);
+            
+            // Convert canvas to blob
+            return new Promise((resolve) => {
+                canvas.toBlob(async (blob) => {
+                    // Create mock JSON
+                    const mockJson = {
+                        "objects": [
+                            {"id": "protein_a", "type": "shape_rectangle", "fill": "lightblue", "text": "Protein A"},
+                            {"id": "protein_b", "type": "shape_rectangle", "fill": "lightgreen", "text": "Protein B"},
+                            {"id": "arrow", "type": "arrow", "stroke": "red"},
+                            {"id": "title", "type": "text", "text": "Demo Pathway"}
+                        ]
+                    };
+                    
+                    const jsonBlob = new Blob([JSON.stringify(mockJson)], {type: 'application/json'});
+                    const context = document.getElementById('context').value || 'Demo pathway analysis';
+                    const figureType = document.getElementById('figureType').value || 'pathway';
+                    
+                    const result = await uploadAndAnalyze(blob, jsonBlob, context, figureType);
+                    resolve(result);
+                });
+            });
+        }
+
+        async function uploadAndAnalyze(imageFile, jsonFile, context, figureType) {
+
+            // Show loading state
+            document.getElementById('loadingState').classList.remove('hidden');
+            document.getElementById('resultsSection').classList.add('hidden');
+            
+            // Animate progress bar
+            const progressBar = document.getElementById('progressBar');
+            let width = 0;
+            const interval = setInterval(() => {
+                width += Math.random() * 10;
+                if (width > 90) {
+                    clearInterval(interval);
+                } else {
+                    progressBar.style.width = width + '%';
+                }
+            }, 500);
+            
+            try {
+                const formData = new FormData();
+                formData.append('image', imageFile);
+                formData.append('json_file', jsonFile);
+                formData.append('context', context);
+                formData.append('figure_type', figureType);
+                
+                const response = await fetch('/analyze-figure/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Server Error (${response.status}): ${errorText}`);
+                }
+                
+                const results = await response.json();
+                analysisResults = results;
+                
+                // Complete progress bar
+                clearInterval(interval);
+                progressBar.style.width = '100%';
+                
+                // Show results after a brief delay
+                setTimeout(() => {
+                    displayResults(results);
+                    document.getElementById('loadingState').classList.add('hidden');
+                    document.getElementById('resultsSection').classList.remove('hidden');
+                    
+                    // Scroll to results
+                    document.getElementById('resultsSection').scrollIntoView({ 
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }, 1000);
+                
+                return true;
+                
+            } catch (error) {
+                clearInterval(interval);
+                document.getElementById('loadingState').classList.add('hidden');
+                alert('Analysis failed: ' + error.message);
+                return false;
+            }
+        }
+
+        // Event handlers
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            await analyzeWithFiles();
+        });
+        
+        document.getElementById('demoBtn').addEventListener('click', async function(e) {
+            e.preventDefault();
+            await analyzeDemo();
+        });
+
+        function displayResults(results) {
+            // Update scores
+            document.getElementById('overallScore').textContent = results.overall_score + '/30';
+            document.getElementById('visualScore').textContent = results.visual_design_score + '/10';
+            document.getElementById('commScore').textContent = results.communication_score + '/10';
+            document.getElementById('sciScore').textContent = results.scientific_accuracy_score + '/10';
+            
+            // Update progress bars with animation
+            setTimeout(() => {
+                document.getElementById('visualBar').style.width = (results.visual_design_score * 10) + '%';
+                document.getElementById('commBar').style.width = (results.communication_score * 10) + '%';
+                document.getElementById('sciBar').style.width = (results.scientific_accuracy_score * 10) + '%';
+            }, 300);
+            
+            // Display content summary
+            document.getElementById('contentSummary').textContent = results.content_summary || 'No content summary available';
+            
+            // Display detailed feedback
+            document.getElementById('detailedFeedback').textContent = results.feedback;
+            
+            // Display recommendations
+            const recList = document.getElementById('recommendationsList');
+            recList.innerHTML = '';
+            
+            if (results.recommendations && results.recommendations.length > 0) {
+                results.recommendations.forEach(rec => {
+                    const priority = rec.priority === 'high' ? 'border-red-200 bg-red-50' : 'border-yellow-200 bg-yellow-50';
+                    const icon = rec.category === 'visual' ? 'palette' : 
+                               rec.category === 'communication' ? 'message-circle' : 'flask';
+                    const color = rec.category === 'visual' ? 'purple' : 
+                                rec.category === 'communication' ? 'green' : 'orange';
+                    
+                    const recCard = document.createElement('div');
+                    recCard.className = `recommendation-card border-l-4 border-${color}-500 ${priority} p-4 rounded-lg transition-all duration-200`;
+                    recCard.innerHTML = `
+                        <div class="flex items-start">
+                            <i data-lucide="${icon}" class="w-5 h-5 text-${color}-600 mr-3 mt-0.5"></i>
+                            <div class="flex-1">
+                                <div class="flex items-center justify-between">
+                                    <span class="font-medium text-gray-900 capitalize">${rec.category}</span>
+                                    <span class="text-xs px-2 py-1 rounded-full ${rec.priority === 'high' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}">
+                                        ${rec.priority} priority
+                                    </span>
+                                </div>
+                                <p class="text-gray-700 mt-1">${rec.text}</p>
+                            </div>
+                        </div>
+                    `;
+                    recList.appendChild(recCard);
+                });
+            } else {
+                recList.innerHTML = '<p class="text-gray-500 italic">No specific recommendations - your figure meets quality standards!</p>';
+            }
+            
+            // Update processing time
+            document.getElementById('processingTime').textContent = results.processing_time.toFixed(2);
+            
+            // Re-initialize Lucide icons for new elements
+            lucide.createIcons();
+        }
+
+        function resetForm() {
+            // Reset form
+            document.getElementById('uploadForm').reset();
+            document.getElementById('image-preview').classList.add('hidden');
+            document.getElementById('json-preview').classList.add('hidden');
+            
+            // Hide results
+            document.getElementById('resultsSection').classList.add('hidden');
+            
+            // Scroll to top
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function exportResults() {
+            if (!analysisResults) return;
+            
+            const exportData = {
+                timestamp: new Date().toISOString(),
+                scores: {
+                    visual_design: analysisResults.visual_design_score,
+                    communication: analysisResults.communication_score,
+                    scientific_accuracy: analysisResults.scientific_accuracy_score,
+                    overall: analysisResults.overall_score
+                },
+                feedback: analysisResults.feedback,
+                recommendations: analysisResults.recommendations,
+                processing_time: analysisResults.processing_time
+            };
+            
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], 
+                                 { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `figure-analysis-${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>

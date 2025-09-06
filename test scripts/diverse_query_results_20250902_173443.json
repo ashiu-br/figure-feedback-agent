@@ -1,0 +1,142 @@
+[
+  {
+    "test": "Budget Backpacker Europe",
+    "result": {
+      "success": true,
+      "duration": 10.194950103759766,
+      "length": 2203,
+      "tool_calls": 6,
+      "agents": [
+        "budget",
+        "local",
+        "research"
+      ]
+    }
+  },
+  {
+    "test": "Luxury Asian Adventure",
+    "result": {
+      "success": true,
+      "duration": 4.786637783050537,
+      "length": 2314,
+      "tool_calls": 6,
+      "agents": [
+        "budget",
+        "local",
+        "research"
+      ]
+    }
+  },
+  {
+    "test": "Family Beach Vacation",
+    "result": {
+      "success": true,
+      "duration": 5.255229949951172,
+      "length": 2050,
+      "tool_calls": 6,
+      "agents": [
+        "budget",
+        "local",
+        "research"
+      ]
+    }
+  },
+  {
+    "test": "Solo Cultural Immersion",
+    "result": {
+      "success": true,
+      "duration": 6.934921979904175,
+      "length": 2451,
+      "tool_calls": 5,
+      "agents": [
+        "budget",
+        "local",
+        "research"
+      ]
+    }
+  },
+  {
+    "test": "Romantic European Getaway",
+    "result": {
+      "success": true,
+      "duration": 5.246424913406372,
+      "length": 2333,
+      "tool_calls": 6,
+      "agents": [
+        "budget",
+        "local",
+        "research"
+      ]
+    }
+  },
+  {
+    "test": "Adventure Sports Trip",
+    "result": {
+      "success": true,
+      "duration": 7.398432970046997,
+      "length": 3444,
+      "tool_calls": 6,
+      "agents": [
+        "budget",
+        "local",
+        "research"
+      ]
+    }
+  },
+  {
+    "test": "Foodie Tour Asia",
+    "result": {
+      "success": true,
+      "duration": 5.445743799209595,
+      "length": 2564,
+      "tool_calls": 6,
+      "agents": [
+        "budget",
+        "local",
+        "research"
+      ]
+    }
+  },
+  {
+    "test": "Business Travel Extended",
+    "result": {
+      "success": true,
+      "duration": 4.12012505531311,
+      "length": 2089,
+      "tool_calls": 5,
+      "agents": [
+        "budget",
+        "local",
+        "research"
+      ]
+    }
+  },
+  {
+    "test": "Wellness Retreat",
+    "result": {
+      "success": true,
+      "duration": 5.102622032165527,
+      "length": 1812,
+      "tool_calls": 6,
+      "agents": [
+        "budget",
+        "local",
+        "research"
+      ]
+    }
+  },
+  {
+    "test": "Photography Expedition",
+    "result": {
+      "success": true,
+      "duration": 6.142525911331177,
+      "length": 2566,
+      "tool_calls": 5,
+      "agents": [
+        "budget",
+        "local",
+        "research"
+      ]
+    }
+  }
+]
