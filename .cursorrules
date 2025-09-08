@@ -1,0 +1,282 @@
+# BioRender Figure Feedback Agent - Cursor Rules
+
+## Project Overview
+This is an AI-powered feedback system for BioRender that analyzes scientific figures and provides actionable recommendations. Built with FastAPI (backend) and static HTML/JS (frontend), the system uses LangGraph to orchestrate multiple specialized AI agents that work in parallel to analyze figure quality across visual design, communication clarity, and scientific accuracy dimensions.
+
+## Tech Stack
+- **Backend**: FastAPI, Python 3.10+, uvicorn
+- **AI Framework**: LangGraph, LangChain, OpenAI/OpenRouter LLMs with vision capabilities
+- **Frontend**: Static HTML, Tailwind CSS, Lucide icons, Vanilla JS, drag-and-drop file upload
+- **Image Processing**: Pillow, BASE64 encoding, multipart file upload
+- **Observability**: Arize/OpenInference tracing (optional)
+- **Deployment**: Docker, Render.com support
+- **Dependencies**: See backend/requirements.txt and backend/pyproject.toml
+
+## Architecture
+
+### Multi-Agent System
+The core system uses 5 specialized agents that execute in parallel:
+1. **Visual Design Agent** - Color usage, layout, hierarchy, typography, spacing analysis
+2. **Communication Agent** - Logical flow, information density, audience appropriateness evaluation
+3. **Scientific Accuracy Agent** - Nomenclature, pathway logic, field conventions validation
+4. **Content Interpretation Agent** - Plain language summaries using hybrid vision-LLM approach with JSON fallback
+5. **Feedback Synthesizer Agent** - Combines all analyses into prioritized, actionable recommendations
+
+### Execution Flow
+```
+START → [Visual Design, Communication, Scientific, Content Interpretation] (parallel) → Feedback Synthesizer → END
+```
+
+### Vision-LLM Integration
+- **Hybrid Approach**: Primary vision analysis using GPT-4o-mini vision API
+- **Graceful Fallback**: JSON-based interpretation when vision unavailable or in TEST_MODE
+- **Error Handling**: Robust fallback system ensures consistent content interpretation
+- **Development Mode**: TEST_MODE=1 disables vision calls for faster development
+
+### Key Files
+- `backend/main.py` - Core application with figure analysis agents and API endpoints
+- `frontend/index.html` - Complete frontend UI with file upload and demo functionality
+- `backend/requirements.txt` - Python dependencies including Pillow for image processing
+- `test scripts/test_figure_analysis.py` - Primary test suite for figure analysis
+- `figure_feedback_agent_prd.md` - Product requirements document
+- `docker-compose.yml` - Container orchestration
+
+## Code Patterns & Best Practices
+
+### Agent Implementation
+- Use `@tool` decorator for agent analysis tools
+- Return structured strings with scores and recommendations
+- Include proper error handling and fallbacks
+- Use `FigureState` TypedDict for state management between agents
+- Implement hybrid vision-LLM approach with JSON fallback
+- Handle empty context/figure_type fields with `context or ""` pattern
+
+### LangGraph Usage
+- Build graphs with `StateGraph(FigureState)`
+- Use parallel execution: 4 analysis agents from START
+- Converge at feedback synthesizer before END
+- Compile without checkpointer: `g.compile()` (no MemorySaver)
+- No thread_id configuration needed
+- Fresh state initialization per request
+
+### FastAPI Patterns
+- Use Pydantic models for request/response validation (`FigureAnalysisRequest`, `FigureAnalysisResponse`)
+- Include CORS middleware for frontend access
+- Serve frontend at root route `/`
+- Health check endpoint at `/health`
+- Main endpoints: `POST /analyze-figure` and `POST /analyze-figure-upload`
+- Support both JSON API with BASE64 images and multipart file uploads
+- Handle file validation and size limits
+
+### Environment Configuration
+Always use environment variables for sensitive data:
+```python
+# LLM Provider (choose one)
+OPENAI_API_KEY=xxx
+# OR  
+OPENROUTER_API_KEY=xxx
+OPENROUTER_MODEL=openai/gpt-4o-mini
+
+# Development mode (disables vision API)
+TEST_MODE=1
+
+# Observability (optional)
+ARIZE_SPACE_ID=xxx
+ARIZE_API_KEY=xxx
+```
+
+### Error Handling
+- Graceful degradation when API keys missing
+- TEST_MODE support for development without vision API calls
+- Proper exception handling in vision analysis with JSON fallback
+- Parameter validation: empty strings instead of None for optional fields
+- Fallback responses when tools fail
+- Timeout handling for LLM requests
+- Vision API rejection handling (expected for invalid images)
+
+### Tracing & Observability
+- Initialize tracing ONCE at module level, not per request
+- Use OpenInference instrumentors for LangChain and LiteLLM
+- Optional tracing based on environment variables
+- Track tool calls and agent executions
+- Monitor vision API usage and fallback frequency
+
+## Development Guidelines
+
+### When Adding New Features
+
+1. **New Analysis Tools**: 
+   - Use `@tool` decorator
+   - Return formatted string responses with scores
+   - Include proper docstrings for LLM context
+   - Add to appropriate agent's tool list
+   - Consider vision integration if image analysis needed
+
+2. **New Agents**:
+   - Follow existing agent pattern
+   - Add to `FigureState` if new state fields needed
+   - Update graph construction in `build_graph()`
+   - Consider parallel vs sequential execution placement
+   - Implement hybrid vision-JSON approach if applicable
+
+3. **API Endpoints**:
+   - Use Pydantic models for validation
+   - Support both JSON and file upload patterns
+   - Include proper error responses
+   - Add to OpenAPI documentation
+   - Test with provided test scripts
+
+4. **Frontend Changes**:
+   - Maintain existing Tailwind CSS patterns
+   - Use Lucide icons consistently
+   - Keep responsive design (mobile-first)
+   - Test file upload and drag-and-drop functionality
+   - Test demo functionality with canvas-generated mock data
+
+### Code Style
+- Use type hints throughout Python code
+- Follow FastAPI/Pydantic naming conventions
+- Use proper async/await where applicable
+- Include comprehensive docstrings
+- Maintain consistent error handling
+- Handle BASE64 encoding/decoding properly
+
+### Testing
+- Primary test: `python "test scripts"/test_figure_analysis.py`
+- Test both TEST_MODE and full vision mode
+- Test file upload and JSON API endpoints
+- Verify parallel agent execution
+- Check tracing output in Arize (if configured)
+- Test frontend functionality including demo mode
+- Verify graceful fallback from vision to JSON analysis
+
+## API Integration Guidelines
+
+### Vision API Integration
+- Use GPT-4o-mini for image analysis (cost-effective with good quality)
+- Implement proper error handling for vision API rejections
+- Always provide JSON fallback for reliability
+- Handle various image formats (PNG, JPG)
+- Validate image size and format before API calls
+- Monitor vision API usage and costs
+
+### Environment Variables
+Add new API keys to:
+- `.env` file (local development)
+- `docker-compose.yml` (container deployment)
+- Deployment platform environment settings
+- Use TEST_MODE for development without API costs
+
+## Performance Considerations
+
+### Optimization
+- Agents execute in parallel (~15 seconds for full analysis)
+- Vision analysis adds 2-3 seconds but provides richer interpretation
+- Cache expensive API responses when applicable
+- Use appropriate LLM models (gpt-4o-mini for vision, gpt-3.5-turbo for text)
+- Implement request queuing for high load
+- Consider streaming responses for real-time updates
+
+### Scaling
+- Current setup handles ~10-15 concurrent requests
+- For higher load: add rate limiting, multiple workers
+- Consider Redis for distributed caching
+- Monitor API usage and costs (especially vision API)
+- Implement proper file upload size limits
+
+## Common Issues & Solutions
+
+### Agent Execution
+- Ensure no MemorySaver checkpointer (causes state issues)
+- Verify parallel edges in graph construction
+- Each request needs fresh state initialization
+- Use TEST_MODE=1 for development without vision API
+
+### Parameter Validation
+- Use `context or ""` instead of `context if context else None`
+- Handle empty optional fields properly
+- Validate file uploads before processing
+
+### Vision Analysis Issues
+- GPT-4o-mini may reject invalid/small images (expected behavior)
+- System gracefully falls back to JSON analysis
+- Verify image is valid PNG/JPG with reasonable dimensions
+- Monitor vision API error rates and adjust fallback logic
+
+### Tracing Issues
+- Initialize tracing at module level, not per request
+- Check Arize credentials in environment
+- Verify instrumentor versions compatibility
+
+### Performance
+- Confirm parallel agent execution working
+- Check LLM API response times
+- Vision analysis adds latency but improves quality
+- Consider TEST_MODE for faster development cycles
+
+## File Organization
+
+### Adding New Files
+- Backend code: `backend/` directory
+- Frontend assets: `frontend/` directory  
+- Tests: `test scripts/` directory (primary: test_figure_analysis.py)
+- Documentation: Root level markdown files
+- Configuration: Root level (docker-compose.yml, render.yaml)
+
+### Naming Conventions
+- Python files: snake_case
+- Environment variables: UPPER_CASE
+- Frontend classes: kebab-case (Tailwind)
+- API endpoints: kebab-case
+- State fields: snake_case in TypedDict
+
+## Security Best Practices
+- Never commit API keys to version control
+- Use environment variables for all secrets
+- Validate all user inputs with Pydantic
+- Implement file upload size and type restrictions
+- Sanitize uploaded file content
+- Rate limit API endpoints for production
+- Validate image files before processing
+
+## Deployment Notes
+- Default port: 8000 (configurable)
+- Supports Docker deployment with docker-compose
+- Render.com deployment via render.yaml
+- Frontend served by FastAPI backend
+- No separate frontend build process needed
+- Set appropriate environment variables for production
+- Do not set TEST_MODE in production for full vision capabilities
+
+## Figure Analysis Specific Patterns
+
+### Input Processing
+- Support both direct JSON API and file upload endpoints
+- Handle BASE64 image encoding properly
+- Validate BioRender JSON structure format
+- Process optional context and figure_type fields
+- Generate demo data with HTML5 Canvas for testing
+
+### Analysis Workflow
+- All analysis agents run in parallel for performance
+- Vision agent processes image data when available
+- JSON agent analyzes structure data as fallback
+- Synthesizer combines all analyses into unified feedback
+- Return structured response with scores and recommendations
+
+### Content Interpretation
+- Hybrid approach: vision-first with JSON fallback
+- Plain language summaries for user verification
+- Handles diverse scientific figure types
+- Graceful error handling and logging
+
+## Future Roadmap
+The project is designed for extension to Phase 2:
+- Automated implementation of recommendations
+- Accept/reject workflow for AI suggestions
+- Live preview of proposed changes
+- Integration with BioRender editor
+- Advanced scientific accuracy validation
+- Enhanced visual design rules
+
+When making changes, always consider the multi-agent architecture, maintain the parallel execution pattern, and ensure proper fallback mechanisms for reliable operation across different deployment environments.
