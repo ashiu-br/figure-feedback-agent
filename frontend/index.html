@@ -32,6 +32,47 @@
             transform: translateY(-1px);
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
         }
+        .agent-card {
+            transition: all 0.3s ease;
+            border-left: 4px solid #e5e7eb;
+        }
+        .agent-card.thinking {
+            border-left-color: #f59e0b;
+            animation: pulse 2s infinite;
+        }
+        .agent-card.using_tools {
+            border-left-color: #3b82f6;
+        }
+        .agent-card.complete {
+            border-left-color: #10b981;
+        }
+        .agent-card.error {
+            border-left-color: #ef4444;
+        }
+        .thinking-log {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+        .thinking-log.expanded {
+            max-height: 300px;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-pending { background-color: #9ca3af; }
+        .status-thinking { background-color: #f59e0b; animation: pulse 1s infinite; }
+        .status-using_tools { background-color: #3b82f6; }
+        .status-complete { background-color: #10b981; }
+        .status-error { background-color: #ef4444; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -139,16 +180,105 @@
             </form>
         </div>
 
-        <!-- Loading State -->
+        <!-- Enhanced Loading State with Agent Progress -->
         <div id="loadingState" class="bg-white rounded-lg shadow-sm border p-8 mb-8 hidden">
-            <div class="text-center">
+            <div class="text-center mb-8">
                 <div class="spinner mx-auto mb-4"></div>
                 <h3 class="text-lg font-semibold text-gray-900 mb-2">Analyzing Your Figure</h3>
-                <p class="text-gray-600 mb-4">Our AI agents are evaluating visual design, communication clarity, and scientific accuracy...</p>
+                <p class="text-gray-600 mb-4">Our AI agents are working in parallel to evaluate your figure...</p>
                 <div class="bg-gray-200 rounded-full h-2 w-full max-w-md mx-auto">
                     <div class="bg-blue-600 h-2 rounded-full transition-all duration-1000" id="progressBar" style="width: 0%"></div>
                 </div>
-                <p class="text-sm text-gray-500 mt-2">This typically takes 10-15 seconds</p>
+                <p class="text-sm text-gray-500 mt-2" id="progressText">Initializing agents...</p>
+            </div>
+            
+            <!-- Real-time Agent Status Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <!-- Visual Design Agent -->
+                <div id="agent-visual_design" class="agent-card bg-gray-50 rounded-lg p-4 border">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center">
+                            <span class="status-indicator status-pending"></span>
+                            <i data-lucide="palette" class="w-4 h-4 text-purple-600 mr-2"></i>
+                            <h4 class="font-medium text-sm">Visual Design</h4>
+                        </div>
+                        <span class="agent-status text-xs text-gray-500">Pending</span>
+                    </div>
+                    <div class="current-step text-xs text-gray-600 mb-1">Waiting to start...</div>
+                    <div class="thinking-messages text-xs text-gray-500 max-h-16 overflow-y-auto"></div>
+                    <button class="toggle-thinking text-xs text-blue-500 hover:underline mt-1 hidden" onclick="toggleThinking('visual_design')">Show Details</button>
+                </div>
+                
+                <!-- Communication Agent -->
+                <div id="agent-communication" class="agent-card bg-gray-50 rounded-lg p-4 border">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center">
+                            <span class="status-indicator status-pending"></span>
+                            <i data-lucide="message-circle" class="w-4 h-4 text-green-600 mr-2"></i>
+                            <h4 class="font-medium text-sm">Communication</h4>
+                        </div>
+                        <span class="agent-status text-xs text-gray-500">Pending</span>
+                    </div>
+                    <div class="current-step text-xs text-gray-600 mb-1">Waiting to start...</div>
+                    <div class="thinking-messages text-xs text-gray-500 max-h-16 overflow-y-auto"></div>
+                    <button class="toggle-thinking text-xs text-blue-500 hover:underline mt-1 hidden" onclick="toggleThinking('communication')">Show Details</button>
+                </div>
+                
+                <!-- Scientific Agent -->
+                <div id="agent-scientific" class="agent-card bg-gray-50 rounded-lg p-4 border">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center">
+                            <span class="status-indicator status-pending"></span>
+                            <i data-lucide="flask" class="w-4 h-4 text-orange-600 mr-2"></i>
+                            <h4 class="font-medium text-sm">Scientific</h4>
+                        </div>
+                        <span class="agent-status text-xs text-gray-500">Pending</span>
+                    </div>
+                    <div class="current-step text-xs text-gray-600 mb-1">Waiting to start...</div>
+                    <div class="thinking-messages text-xs text-gray-500 max-h-16 overflow-y-auto"></div>
+                    <button class="toggle-thinking text-xs text-blue-500 hover:underline mt-1 hidden" onclick="toggleThinking('scientific')">Show Details</button>
+                </div>
+                
+                <!-- Content Interpretation Agent -->
+                <div id="agent-content_interpretation" class="agent-card bg-gray-50 rounded-lg p-4 border">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center">
+                            <span class="status-indicator status-pending"></span>
+                            <i data-lucide="eye" class="w-4 h-4 text-blue-600 mr-2"></i>
+                            <h4 class="font-medium text-sm">Content</h4>
+                        </div>
+                        <span class="agent-status text-xs text-gray-500">Pending</span>
+                    </div>
+                    <div class="current-step text-xs text-gray-600 mb-1">Waiting to start...</div>
+                    <div class="thinking-messages text-xs text-gray-500 max-h-16 overflow-y-auto"></div>
+                    <button class="toggle-thinking text-xs text-blue-500 hover:underline mt-1 hidden" onclick="toggleThinking('content_interpretation')">Show Details</button>
+                </div>
+            </div>
+            
+            <!-- Synthesis Agent (appears after others complete) -->
+            <div id="agent-feedback_synthesizer" class="agent-card bg-gray-50 rounded-lg p-4 border mx-auto max-w-md hidden">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center">
+                        <span class="status-indicator status-pending"></span>
+                        <i data-lucide="brain" class="w-4 h-4 text-indigo-600 mr-2"></i>
+                        <h4 class="font-medium text-sm">Feedback Synthesizer</h4>
+                    </div>
+                    <span class="agent-status text-xs text-gray-500">Pending</span>
+                </div>
+                <div class="current-step text-xs text-gray-600 mb-1">Waiting for analysis completion...</div>
+                <div class="thinking-messages text-xs text-gray-500 max-h-16 overflow-y-auto"></div>
+                <button class="toggle-thinking text-xs text-blue-500 hover:underline mt-1 hidden" onclick="toggleThinking('feedback_synthesizer')">Show Details</button>
+            </div>
+            
+            <!-- Real-time Activity Log -->
+            <div class="mt-6">
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="font-medium text-gray-900">Live Activity</h4>
+                    <button id="clearLog" class="text-xs text-gray-500 hover:text-gray-700" onclick="clearActivityLog()">Clear</button>
+                </div>
+                <div id="activityLog" class="bg-gray-900 text-green-400 text-xs font-mono p-3 rounded max-h-32 overflow-y-auto">
+                    <div>Waiting for analysis to begin...</div>
+                </div>
             </div>
         </div>
 
@@ -255,6 +385,162 @@
         lucide.createIcons();
 
         let analysisResults = null;
+        let websocket = null;
+        let sessionId = null;
+        let agentThinkingExpanded = {};
+        
+        // WebSocket connection for real-time updates
+        function connectWebSocket(sessionId) {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/${sessionId}`;
+            
+            websocket = new WebSocket(wsUrl);
+            
+            websocket.onopen = function(event) {
+                console.log('WebSocket connected');
+                addToActivityLog('🔗 Connected to real-time analysis');
+            };
+            
+            websocket.onmessage = function(event) {
+                const update = JSON.parse(event.data);
+                handleProgressUpdate(update);
+            };
+            
+            websocket.onclose = function(event) {
+                console.log('WebSocket closed');
+                if (event.code !== 1000) { // Not a normal closure
+                    addToActivityLog('⚠️ Connection lost - analysis will continue');
+                }
+            };
+            
+            websocket.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                addToActivityLog('❌ Connection error - falling back to standard mode');
+            };
+        }
+        
+        // Handle progress updates from WebSocket
+        function handleProgressUpdate(update) {
+            const { type, agent, message, timestamp, step, data } = update;
+            
+            // Add to activity log
+            const time = new Date(timestamp * 1000).toLocaleTimeString();
+            if (agent) {
+                addToActivityLog(`[${time}] ${agent.toUpperCase()}: ${message}`);
+            } else {
+                addToActivityLog(`[${time}] SYSTEM: ${message}`);
+            }
+            
+            // Update agent status
+            if (agent && type !== 'analysis_complete') {
+                updateAgentStatus(agent, type, step, message, data);
+            }
+            
+            // Handle different update types
+            switch (type) {
+                case 'analysis_start':
+                    document.getElementById('progressText').textContent = 'Starting multi-agent analysis...';
+                    break;
+                case 'agent_start':
+                    if (agent === 'feedback_synthesizer') {
+                        document.getElementById('agent-feedback_synthesizer').classList.remove('hidden');
+                    }
+                    break;
+                case 'analysis_complete':
+                    document.getElementById('progressText').textContent = 'Analysis completed!';
+                    document.getElementById('progressBar').style.width = '100%';
+                    break;
+            }
+        }
+        
+        // Update individual agent status
+        function updateAgentStatus(agentName, type, step, message, data) {
+            const agentCard = document.getElementById(`agent-${agentName}`);
+            if (!agentCard) return;
+            
+            const statusIndicator = agentCard.querySelector('.status-indicator');
+            const statusText = agentCard.querySelector('.agent-status');
+            const currentStep = agentCard.querySelector('.current-step');
+            const thinkingMessages = agentCard.querySelector('.thinking-messages');
+            const toggleButton = agentCard.querySelector('.toggle-thinking');
+            
+            // Update status based on type
+            let status = 'pending';
+            let statusLabel = 'Pending';
+            
+            if (type === 'agent_start' || type === 'agent_thinking') {
+                status = 'thinking';
+                statusLabel = 'Thinking';
+            } else if (type === 'tool_call') {
+                status = 'using_tools';
+                statusLabel = 'Using Tools';
+            } else if (type === 'agent_complete') {
+                status = 'complete';
+                statusLabel = 'Complete';
+            }
+            
+            // Update UI elements
+            agentCard.className = agentCard.className.replace(/agent-card\s+(\w+)?/, `agent-card ${status}`);
+            statusIndicator.className = statusIndicator.className.replace(/status-\w+/, `status-${status}`);
+            statusText.textContent = statusLabel;
+            
+            if (step) {
+                currentStep.textContent = step.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            }
+            
+            // Add thinking message
+            if (type === 'agent_thinking' && message) {
+                const messageDiv = document.createElement('div');
+                messageDiv.textContent = `• ${message}`;
+                messageDiv.className = 'mb-1';
+                thinkingMessages.appendChild(messageDiv);
+                thinkingMessages.scrollTop = thinkingMessages.scrollHeight;
+                
+                // Show toggle button if there are messages
+                if (thinkingMessages.children.length > 0) {
+                    toggleButton.classList.remove('hidden');
+                }
+            }
+            
+            // Add confidence score if available
+            if (data && data.confidence) {
+                const confidence = Math.round(data.confidence * 100);
+                statusText.textContent += ` (${confidence}% confident)`;
+            }
+        }
+        
+        // Toggle thinking details for an agent
+        function toggleThinking(agentName) {
+            const expanded = agentThinkingExpanded[agentName] || false;
+            agentThinkingExpanded[agentName] = !expanded;
+            
+            const agentCard = document.getElementById(`agent-${agentName}`);
+            const thinkingMessages = agentCard.querySelector('.thinking-messages');
+            const toggleButton = agentCard.querySelector('.toggle-thinking');
+            
+            if (agentThinkingExpanded[agentName]) {
+                thinkingMessages.style.maxHeight = '200px';
+                toggleButton.textContent = 'Hide Details';
+            } else {
+                thinkingMessages.style.maxHeight = '64px';
+                toggleButton.textContent = 'Show Details';
+            }
+        }
+        
+        // Add message to activity log
+        function addToActivityLog(message) {
+            const log = document.getElementById('activityLog');
+            const messageDiv = document.createElement('div');
+            messageDiv.textContent = message;
+            log.appendChild(messageDiv);
+            log.scrollTop = log.scrollHeight;
+        }
+        
+        // Clear activity log
+        function clearActivityLog() {
+            const log = document.getElementById('activityLog');
+            log.innerHTML = '<div>Log cleared...</div>';
+        }
 
         function handleFileSelect(input, previewId) {
             const file = input.files[0];
@@ -357,10 +643,16 @@
         }
 
         async function uploadAndAnalyze(imageFile, jsonFile, context, figureType) {
+            // Generate session ID and connect WebSocket
+            sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+            connectWebSocket(sessionId);
 
             // Show loading state
             document.getElementById('loadingState').classList.remove('hidden');
             document.getElementById('resultsSection').classList.add('hidden');
+            
+            // Reset agent states
+            resetAgentStates();
             
             // Animate progress bar
             const progressBar = document.getElementById('progressBar');
@@ -381,7 +673,12 @@
                 formData.append('context', context);
                 formData.append('figure_type', figureType);
                 
-                const response = await fetch('/analyze-figure/upload', {
+                // Use WebSocket-enabled endpoint
+                const endpoint = websocket && websocket.readyState === WebSocket.OPEN 
+                    ? `/analyze-figure/upload/${sessionId}`
+                    : '/analyze-figure/upload';
+                
+                const response = await fetch(endpoint, {
                     method: 'POST',
                     body: formData
                 });
@@ -404,6 +701,12 @@
                     document.getElementById('loadingState').classList.add('hidden');
                     document.getElementById('resultsSection').classList.remove('hidden');
                     
+                    // Close WebSocket connection
+                    if (websocket) {
+                        websocket.close();
+                        websocket = null;
+                    }
+                    
                     // Scroll to results
                     document.getElementById('resultsSection').scrollIntoView({ 
                         behavior: 'smooth',
@@ -417,8 +720,52 @@
                 clearInterval(interval);
                 document.getElementById('loadingState').classList.add('hidden');
                 alert('Analysis failed: ' + error.message);
+                
+                // Close WebSocket connection on error
+                if (websocket) {
+                    websocket.close();
+                    websocket = null;
+                }
+                
                 return false;
             }
+        }
+        
+        // Reset agent states to initial pending state
+        function resetAgentStates() {
+            const agents = ['visual_design', 'communication', 'scientific', 'content_interpretation', 'feedback_synthesizer'];
+            
+            agents.forEach(agentName => {
+                const agentCard = document.getElementById(`agent-${agentName}`);
+                if (!agentCard) return;
+                
+                // Reset classes and status
+                agentCard.className = 'agent-card bg-gray-50 rounded-lg p-4 border';
+                const statusIndicator = agentCard.querySelector('.status-indicator');
+                const statusText = agentCard.querySelector('.agent-status');
+                const currentStep = agentCard.querySelector('.current-step');
+                const thinkingMessages = agentCard.querySelector('.thinking-messages');
+                const toggleButton = agentCard.querySelector('.toggle-thinking');
+                
+                statusIndicator.className = 'status-indicator status-pending';
+                statusText.textContent = 'Pending';
+                currentStep.textContent = 'Waiting to start...';
+                thinkingMessages.innerHTML = '';
+                toggleButton.classList.add('hidden');
+                
+                // Hide synthesizer initially
+                if (agentName === 'feedback_synthesizer') {
+                    agentCard.classList.add('hidden');
+                }
+            });
+            
+            // Reset activity log
+            const log = document.getElementById('activityLog');
+            log.innerHTML = '<div>Waiting for analysis to begin...</div>';
+            
+            // Reset progress
+            document.getElementById('progressBar').style.width = '0%';
+            document.getElementById('progressText').textContent = 'Initializing agents...';
         }
 
         // Event handlers
@@ -499,8 +846,19 @@
             document.getElementById('image-preview').classList.add('hidden');
             document.getElementById('json-preview').classList.add('hidden');
             
-            // Hide results
+            // Hide results and loading
             document.getElementById('resultsSection').classList.add('hidden');
+            document.getElementById('loadingState').classList.add('hidden');
+            
+            // Close WebSocket if open
+            if (websocket) {
+                websocket.close();
+                websocket = null;
+            }
+            
+            // Reset session
+            sessionId = null;
+            agentThinkingExpanded = {};
             
             // Scroll to top
             window.scrollTo({ top: 0, behavior: 'smooth' });

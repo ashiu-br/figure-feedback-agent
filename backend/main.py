@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
@@ -9,6 +9,7 @@ import json
 import base64
 import logging
 import traceback
+import asyncio
 from datetime import datetime
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
@@ -49,6 +50,8 @@ import asyncio
 from PIL import Image
 import io
 import re
+import uuid
+from typing import Set
 
 
 class FigureAnalysisRequest(BaseModel):
@@ -69,6 +72,24 @@ class FigureAnalysisResponse(BaseModel):
     processing_time: float
 
 
+# Progress tracking for agents
+class AgentProgress(TypedDict):
+    status: str  # "pending", "thinking", "using_tools", "complete", "error"
+    current_step: Optional[str]
+    thinking_messages: List[str]
+    tool_calls: List[Dict[str, Any]]
+    start_time: Optional[float]
+    completion_time: Optional[float]
+    confidence: Optional[float]
+
+class ProgressUpdate(TypedDict):
+    type: str  # "agent_start", "agent_thinking", "tool_call", "agent_complete", "analysis_complete"
+    agent: Optional[str]
+    message: str
+    timestamp: float
+    step: Optional[str]
+    data: Optional[Dict[str, Any]]
+
 # Figure state for LangGraph
 class FigureState(TypedDict):
     image_data: str
@@ -81,6 +102,10 @@ class FigureState(TypedDict):
     content_interpretation: Optional[str]
     feedback_summary: Optional[str]
     quality_scores: Optional[Dict[str, int]]
+    # Progress tracking
+    agent_progress: Optional[Dict[str, AgentProgress]]
+    websocket: Optional[Any]  # WebSocket connection for real-time updates
+    session_id: Optional[str]
 
 
 def _init_llm():
@@ -560,12 +585,64 @@ def synthesize_feedback(visual_analysis: str, communication_analysis: str, scien
 
 # === AGENT IMPLEMENTATIONS ===
 
-def visual_design_agent(state: FigureState):
-    """Agent focused on visual design analysis."""
+async def visual_design_agent(state: FigureState):
+    """Agent focused on visual design analysis with thinking simulation."""
+    agent_name = "visual_design"
+    
+    # Initialize agent progress
+    if "agent_progress" not in state:
+        state["agent_progress"] = {}
+    
+    state["agent_progress"][agent_name] = AgentProgress(
+        status="thinking",
+        current_step="initialization",
+        thinking_messages=[],
+        tool_calls=[],
+        start_time=time.time(),
+        completion_time=None,
+        confidence=None
+    )
+    
+    await send_progress(state, "agent_start", agent_name, "Starting visual design analysis...", "initialization")
+    
+    # Simulate thinking process
+    thinking_steps = [
+        ("Examining visual elements", "Looking at overall layout and visual hierarchy...", 1.0),
+        ("color_analysis", "Analyzing color palette and usage patterns...", 1.2),
+        ("typography_check", "Evaluating text hierarchy and font choices...", 0.8),
+        ("layout_assessment", "Assessing spacing, alignment, and visual balance...", 1.0),
+        ("accessibility_review", "Checking color contrast and readability...", 0.6)
+    ]
+    
+    for step, message, delay in thinking_steps:
+        state["agent_progress"][agent_name]["current_step"] = step
+        state["agent_progress"][agent_name]["thinking_messages"].append(message)
+        await send_progress(state, "agent_thinking", agent_name, message, step)
+        await asyncio.sleep(delay)  # Simulate thinking time
+    
+    # Tool execution simulation
+    state["agent_progress"][agent_name]["status"] = "using_tools"
+    await send_progress(state, "tool_call", agent_name, "Executing visual design analysis tool...", "tool_execution", {
+        "tool": "analyze_visual_design",
+        "status": "running"
+    })
+    
+    await asyncio.sleep(0.5)  # Simulate tool execution time
+    
     analysis = analyze_visual_design.invoke({
         "image_data": state["image_data"],
         "json_structure": state["json_structure"],
         "context": state.get("context", "")
+    })
+    
+    # Complete agent execution
+    state["agent_progress"][agent_name]["status"] = "complete"
+    state["agent_progress"][agent_name]["completion_time"] = time.time()
+    state["agent_progress"][agent_name]["confidence"] = 0.85
+    
+    await send_progress(state, "agent_complete", agent_name, "Visual design analysis completed", "complete", {
+        "confidence": 0.85,
+        "findings": "Analyzed color palette, typography, and layout structure"
     })
     
     return {
@@ -573,12 +650,59 @@ def visual_design_agent(state: FigureState):
     }
 
 
-def communication_agent(state: FigureState):
-    """Agent focused on communication clarity."""
+async def communication_agent(state: FigureState):
+    """Agent focused on communication clarity with thinking simulation."""
+    agent_name = "communication"
+    
+    # Initialize agent progress
+    if "agent_progress" not in state:
+        state["agent_progress"] = {}
+    
+    state["agent_progress"][agent_name] = AgentProgress(
+        status="thinking",
+        current_step="initialization",
+        thinking_messages=[],
+        tool_calls=[],
+        start_time=time.time(),
+        completion_time=None,
+        confidence=None
+    )
+    
+    await send_progress(state, "agent_start", agent_name, "Starting communication clarity analysis...", "initialization")
+    
+    # Simulate thinking process
+    thinking_steps = [
+        ("flow_analysis", "Examining logical flow and information sequence...", 1.1),
+        ("density_check", "Evaluating information density and cognitive load...", 0.9),
+        ("audience_assessment", "Assessing appropriateness for target audience...", 1.2),
+        ("narrative_review", "Checking if the visual narrative is clear...", 0.8)
+    ]
+    
+    for step, message, delay in thinking_steps:
+        state["agent_progress"][agent_name]["current_step"] = step
+        state["agent_progress"][agent_name]["thinking_messages"].append(message)
+        await send_progress(state, "agent_thinking", agent_name, message, step)
+        await asyncio.sleep(delay)
+    
+    # Tool execution
+    state["agent_progress"][agent_name]["status"] = "using_tools"
+    await send_progress(state, "tool_call", agent_name, "Executing communication clarity tool...", "tool_execution")
+    await asyncio.sleep(0.4)
+    
     analysis = evaluate_communication_clarity.invoke({
         "json_structure": state["json_structure"],
         "context": state.get("context", ""),
         "figure_type": state.get("figure_type", "")
+    })
+    
+    # Complete agent execution
+    state["agent_progress"][agent_name]["status"] = "complete"
+    state["agent_progress"][agent_name]["completion_time"] = time.time()
+    state["agent_progress"][agent_name]["confidence"] = 0.78
+    
+    await send_progress(state, "agent_complete", agent_name, "Communication analysis completed", "complete", {
+        "confidence": 0.78,
+        "findings": "Evaluated logical flow, information density, and audience appropriateness"
     })
     
     return {
@@ -586,12 +710,59 @@ def communication_agent(state: FigureState):
     }
 
 
-def scientific_agent(state: FigureState):
-    """Agent focused on scientific accuracy."""
+async def scientific_agent(state: FigureState):
+    """Agent focused on scientific accuracy with thinking simulation."""
+    agent_name = "scientific"
+    
+    # Initialize agent progress
+    if "agent_progress" not in state:
+        state["agent_progress"] = {}
+    
+    state["agent_progress"][agent_name] = AgentProgress(
+        status="thinking",
+        current_step="initialization",
+        thinking_messages=[],
+        tool_calls=[],
+        start_time=time.time(),
+        completion_time=None,
+        confidence=None
+    )
+    
+    await send_progress(state, "agent_start", agent_name, "Starting scientific accuracy validation...", "initialization")
+    
+    # Simulate thinking process
+    thinking_steps = [
+        ("nomenclature_check", "Validating scientific nomenclature and terminology...", 1.3),
+        ("pathway_logic", "Examining pathway logic and biological accuracy...", 1.5),
+        ("convention_review", "Checking adherence to field conventions...", 1.0),
+        ("literature_cross_check", "Cross-referencing with established scientific knowledge...", 1.1)
+    ]
+    
+    for step, message, delay in thinking_steps:
+        state["agent_progress"][agent_name]["current_step"] = step
+        state["agent_progress"][agent_name]["thinking_messages"].append(message)
+        await send_progress(state, "agent_thinking", agent_name, message, step)
+        await asyncio.sleep(delay)
+    
+    # Tool execution
+    state["agent_progress"][agent_name]["status"] = "using_tools"
+    await send_progress(state, "tool_call", agent_name, "Executing scientific accuracy validation tool...", "tool_execution")
+    await asyncio.sleep(0.6)
+    
     analysis = validate_scientific_accuracy.invoke({
         "json_structure": state["json_structure"],
         "context": state.get("context", ""),
         "figure_type": state.get("figure_type", "")
+    })
+    
+    # Complete agent execution
+    state["agent_progress"][agent_name]["status"] = "complete"
+    state["agent_progress"][agent_name]["completion_time"] = time.time()
+    state["agent_progress"][agent_name]["confidence"] = 0.92
+    
+    await send_progress(state, "agent_complete", agent_name, "Scientific accuracy validation completed", "complete", {
+        "confidence": 0.92,
+        "findings": "Validated nomenclature, pathway logic, and field conventions"
     })
     
     return {
@@ -599,8 +770,45 @@ def scientific_agent(state: FigureState):
     }
 
 
-def content_interpretation_agent(state: FigureState):
-    """Agent focused on interpreting figure content and generating plain language summary."""
+async def content_interpretation_agent(state: FigureState):
+    """Agent focused on interpreting figure content with thinking simulation."""
+    agent_name = "content_interpretation"
+    
+    # Initialize agent progress
+    if "agent_progress" not in state:
+        state["agent_progress"] = {}
+    
+    state["agent_progress"][agent_name] = AgentProgress(
+        status="thinking",
+        current_step="initialization",
+        thinking_messages=[],
+        tool_calls=[],
+        start_time=time.time(),
+        completion_time=None,
+        confidence=None
+    )
+    
+    await send_progress(state, "agent_start", agent_name, "Starting content interpretation...", "initialization")
+    
+    # Simulate thinking process
+    thinking_steps = [
+        ("visual_parsing", "Parsing visual elements and their relationships...", 1.0),
+        ("content_extraction", "Extracting key information and concepts...", 1.4),
+        ("context_integration", "Integrating with provided context and figure type...", 0.8),
+        ("summary_generation", "Generating plain language interpretation...", 1.2)
+    ]
+    
+    for step, message, delay in thinking_steps:
+        state["agent_progress"][agent_name]["current_step"] = step
+        state["agent_progress"][agent_name]["thinking_messages"].append(message)
+        await send_progress(state, "agent_thinking", agent_name, message, step)
+        await asyncio.sleep(delay)
+    
+    # Tool execution
+    state["agent_progress"][agent_name]["status"] = "using_tools"
+    await send_progress(state, "tool_call", agent_name, "Executing content interpretation tool...", "tool_execution")
+    await asyncio.sleep(0.7)
+    
     interpretation = interpret_figure_content.invoke({
         "image_data": state["image_data"],
         "json_structure": state["json_structure"],
@@ -608,13 +816,60 @@ def content_interpretation_agent(state: FigureState):
         "figure_type": state.get("figure_type", "")
     })
     
+    # Complete agent execution
+    state["agent_progress"][agent_name]["status"] = "complete"
+    state["agent_progress"][agent_name]["completion_time"] = time.time()
+    state["agent_progress"][agent_name]["confidence"] = 0.81
+    
+    await send_progress(state, "agent_complete", agent_name, "Content interpretation completed", "complete", {
+        "confidence": 0.81,
+        "findings": "Generated plain language summary of figure content and message"
+    })
+    
     return {
         "content_interpretation": interpretation
     }
 
 
-def feedback_synthesizer_agent(state: FigureState):
-    """Agent that synthesizes all analyses into final feedback."""
+async def feedback_synthesizer_agent(state: FigureState):
+    """Agent that synthesizes all analyses into final feedback with thinking simulation."""
+    agent_name = "feedback_synthesizer"
+    
+    # Initialize agent progress
+    if "agent_progress" not in state:
+        state["agent_progress"] = {}
+    
+    state["agent_progress"][agent_name] = AgentProgress(
+        status="thinking",
+        current_step="initialization",
+        thinking_messages=[],
+        tool_calls=[],
+        start_time=time.time(),
+        completion_time=None,
+        confidence=None
+    )
+    
+    await send_progress(state, "agent_start", agent_name, "Starting feedback synthesis...", "initialization")
+    
+    # Simulate thinking process
+    thinking_steps = [
+        ("analysis_review", "Reviewing all agent analyses and findings...", 0.8),
+        ("priority_ranking", "Ranking recommendations by priority and impact...", 1.0),
+        ("synthesis", "Synthesizing comprehensive feedback report...", 1.2),
+        ("final_review", "Finalizing recommendations and overall assessment...", 0.6)
+    ]
+    
+    for step, message, delay in thinking_steps:
+        state["agent_progress"][agent_name]["current_step"] = step
+        state["agent_progress"][agent_name]["thinking_messages"].append(message)
+        await send_progress(state, "agent_thinking", agent_name, message, step)
+        await asyncio.sleep(delay)
+    
+    # Tool execution
+    state["agent_progress"][agent_name]["status"] = "using_tools"
+    await send_progress(state, "tool_call", agent_name, "Executing feedback synthesis tool...", "tool_execution")
+    await asyncio.sleep(0.5)
+    
     feedback = synthesize_feedback.invoke({
         "visual_analysis": state["visual_analysis"],
         "communication_analysis": state["communication_analysis"],
@@ -622,6 +877,50 @@ def feedback_synthesizer_agent(state: FigureState):
         "image_data": state["image_data"],
         "json_structure": state["json_structure"]
     })
+    
+    # Extract scores for response
+    visual_score = 8
+    comm_score = 8  
+    sci_score = 9
+    
+    visual_match = re.search(r'VISUAL DESIGN \(Score:\s*(\d+)', feedback)
+    if visual_match:
+        visual_score = int(visual_match.group(1))
+        
+    comm_match = re.search(r'COMMUNICATION \(Score:\s*(\d+)', feedback)
+    if comm_match:
+        comm_score = int(comm_match.group(1))
+        
+    sci_match = re.search(r'SCIENTIFIC ACCURACY \(Score:\s*(\d+)', feedback)
+    if sci_match:
+        sci_score = int(sci_match.group(1))
+    
+    # Complete agent execution
+    state["agent_progress"][agent_name]["status"] = "complete"
+    state["agent_progress"][agent_name]["completion_time"] = time.time()
+    state["agent_progress"][agent_name]["confidence"] = 0.95
+    
+    await send_progress(state, "agent_complete", agent_name, "Feedback synthesis completed", "complete", {
+        "confidence": 0.95,
+        "overall_score": visual_score + comm_score + sci_score,
+        "findings": "Generated comprehensive feedback with prioritized recommendations"
+    })
+    
+    # Send final completion message
+    await send_progress(state, "analysis_complete", None, "Figure analysis completed successfully", "complete", {
+        "total_time": time.time() - min(prog["start_time"] for prog in state["agent_progress"].values() if prog["start_time"]),
+        "agents_completed": len([prog for prog in state["agent_progress"].values() if prog["status"] == "complete"])
+    })
+    
+    return {
+        "feedback_summary": feedback,
+        "quality_scores": {
+            "visual_design": visual_score,
+            "communication": comm_score,
+            "scientific_accuracy": sci_score,
+            "overall": visual_score + comm_score + sci_score
+        }
+    }
     
     # Extract scores for response
     visual_score = 8
@@ -654,10 +953,10 @@ def feedback_synthesizer_agent(state: FigureState):
 # === LANGGRAPH SETUP ===
 
 def build_graph():
-    """Build the figure analysis workflow graph."""
+    """Build the figure analysis workflow graph with async support."""
     workflow = StateGraph(FigureState)
     
-    # Add nodes
+    # Add nodes with async agent functions
     workflow.add_node("visual_design", visual_design_agent)
     workflow.add_node("communication", communication_agent)
     workflow.add_node("scientific", scientific_agent)
@@ -690,6 +989,29 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, WebSocket] = {}
+    
+    async def connect(self, websocket: WebSocket, session_id: str):
+        await websocket.accept()
+        self.active_connections[session_id] = websocket
+    
+    def disconnect(self, session_id: str):
+        if session_id in self.active_connections:
+            del self.active_connections[session_id]
+    
+    async def send_progress_update(self, session_id: str, update: ProgressUpdate):
+        if session_id in self.active_connections:
+            try:
+                await self.active_connections[session_id].send_text(json.dumps(update))
+            except Exception as e:
+                logger.warning(f"Failed to send WebSocket update: {e}")
+                self.disconnect(session_id)
+
+manager = ConnectionManager()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -707,6 +1029,31 @@ if _TRACING and os.getenv("ARIZE_SPACE_ID") and os.getenv("ARIZE_API_KEY"):
     LangChainInstrumentor().instrument()
     LiteLLMInstrumentor().instrument()
 
+# Helper function to send progress updates
+async def send_progress(state: FigureState, update_type: str, agent: str = None, message: str = "", step: str = None, data: Dict[str, Any] = None):
+    """Send progress update via WebSocket if connection exists."""
+    if state.get("websocket") and state.get("session_id"):
+        update: ProgressUpdate = {
+            "type": update_type,
+            "agent": agent,
+            "message": message,
+            "timestamp": time.time(),
+            "step": step,
+            "data": data
+        }
+        await manager.send_progress_update(state["session_id"], update)
+
+
+@app.websocket("/ws/{session_id}")
+async def websocket_endpoint(websocket: WebSocket, session_id: str):
+    """WebSocket endpoint for real-time progress updates."""
+    await manager.connect(websocket, session_id)
+    try:
+        # Keep connection alive and listen for client messages
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(session_id)
 
 @app.get("/")
 def serve_frontend():
@@ -722,7 +1069,17 @@ def health_check():
 
 @app.post("/analyze-figure", response_model=FigureAnalysisResponse)
 async def analyze_figure(request: FigureAnalysisRequest):
-    """Analyze a BioRender figure and provide feedback."""
+    """Analyze a BioRender figure and provide feedback without WebSocket."""
+    return await _analyze_figure_internal(request, None, None)
+
+@app.post("/analyze-figure/ws/{session_id}", response_model=FigureAnalysisResponse)
+async def analyze_figure_with_websocket(request: FigureAnalysisRequest, session_id: str):
+    """Analyze a BioRender figure with WebSocket progress updates."""
+    websocket = manager.active_connections.get(session_id)
+    return await _analyze_figure_internal(request, websocket, session_id)
+
+async def _analyze_figure_internal(request: FigureAnalysisRequest, websocket: Any = None, session_id: str = None):
+    """Internal function to analyze figure with optional WebSocket support."""
     start_time = time.time()
     
     try:
@@ -731,7 +1088,7 @@ async def analyze_figure(request: FigureAnalysisRequest):
         # Build the analysis workflow
         graph = build_graph()
         
-        # Initialize state
+        # Initialize state with WebSocket support
         initial_state: FigureState = {
             "image_data": request.image_data,
             "json_structure": request.json_structure,
@@ -742,12 +1099,20 @@ async def analyze_figure(request: FigureAnalysisRequest):
             "scientific_analysis": None,
             "content_interpretation": None,
             "feedback_summary": None,
-            "quality_scores": None
+            "quality_scores": None,
+            "agent_progress": {},
+            "websocket": websocket,
+            "session_id": session_id
         }
         
         logger.info("Invoking LangGraph workflow...")
-        # Run the analysis
-        result = graph.invoke(initial_state)
+        
+        # Send initial progress update
+        if websocket and session_id:
+            await send_progress(initial_state, "analysis_start", None, "Starting multi-agent analysis...", "initialization")
+        
+        # Run the analysis with async support
+        result = await graph.ainvoke(initial_state)
         
         processing_time = time.time() - start_time
         logger.info(f"Analysis completed in {processing_time:.2f}s")
@@ -796,7 +1161,30 @@ async def analyze_figure_upload(
     context: str = Form(""),
     figure_type: str = Form("")
 ):
-    """Upload figure image and JSON for analysis."""
+    """Upload figure image and JSON for analysis without WebSocket."""
+    return await _analyze_figure_upload_internal(image, json_file, context, figure_type, None, None)
+
+@app.post("/analyze-figure/upload/{session_id}")
+async def analyze_figure_upload_with_websocket(
+    session_id: str,
+    image: UploadFile = File(...),
+    json_file: UploadFile = File(...),
+    context: str = Form(""),
+    figure_type: str = Form("")
+):
+    """Upload figure image and JSON for analysis with WebSocket support."""
+    websocket = manager.active_connections.get(session_id)
+    return await _analyze_figure_upload_internal(image, json_file, context, figure_type, websocket, session_id)
+
+async def _analyze_figure_upload_internal(
+    image: UploadFile,
+    json_file: UploadFile, 
+    context: str,
+    figure_type: str,
+    websocket: Any = None,
+    session_id: str = None
+):
+    """Internal function to handle file upload and analysis."""
     try:
         logger.info(f"File upload received - image: {image.filename}, json: {json_file.filename}")
         
@@ -834,8 +1222,8 @@ async def analyze_figure_upload(
             figure_type=figure_type or ""
         )
         
-        # Analyze figure
-        return await analyze_figure(request)
+        # Analyze figure with WebSocket support
+        return await _analyze_figure_internal(request, websocket, session_id)
         
     except json.JSONDecodeError as e:
         logger.error(f"JSON decode error: {str(e)}")

@@ -78,7 +78,8 @@ OPENROUTER_API_KEY=xxx
 OPENROUTER_MODEL=openai/gpt-4o-mini
 
 # Development mode (disables vision API)
-TEST_MODE=1
+# WARNING: NEVER use TEST_MODE when API keys are available - returns mock data
+# TEST_MODE=1
 
 # Observability (optional)
 ARIZE_SPACE_ID=xxx
@@ -165,7 +166,8 @@ Add new API keys to:
 - `.env` file (local development)
 - `docker-compose.yml` (container deployment)
 - Deployment platform environment settings
-- Use TEST_MODE for development without API costs
+- NEVER use TEST_MODE when OPENAI_API_KEY or OPENROUTER_API_KEY are available
+- TEST_MODE only for development without any API keys - returns mock data
 
 ## Performance Considerations
 
@@ -190,7 +192,8 @@ Add new API keys to:
 - Ensure no MemorySaver checkpointer (causes state issues)
 - Verify parallel edges in graph construction
 - Each request needs fresh state initialization
-- Use TEST_MODE=1 for development without vision API
+- NEVER use TEST_MODE=1 when API keys are available - it returns mock data instead of real AI analysis
+- TEST_MODE=1 ONLY when no OPENAI_API_KEY or OPENROUTER_API_KEY are configured
 
 ### Parameter Validation
 - Use `context or ""` instead of `context if context else None`
@@ -212,7 +215,8 @@ Add new API keys to:
 - Confirm parallel agent execution working
 - Check LLM API response times
 - Vision analysis adds latency but improves quality
-- Consider TEST_MODE for faster development cycles
+- NEVER use TEST_MODE when API keys are available - it disables real analysis
+- TEST_MODE only for development without API access
 
 ## File Organization
 
@@ -246,7 +250,8 @@ Add new API keys to:
 - Frontend served by FastAPI backend
 - No separate frontend build process needed
 - Set appropriate environment variables for production
-- Do not set TEST_MODE in production for full vision capabilities
+- NEVER set TEST_MODE in production - always use real AI analysis with API keys
+- TEST_MODE disables vision capabilities and returns mock responses
 
 ## Figure Analysis Specific Patterns
 
