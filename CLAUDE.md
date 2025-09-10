@@ -16,8 +16,11 @@ pip install -r requirements.txt
 # Start development server with hot reload  
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
-# Quick startup script (starts backend, serves frontend at /)
-../start.sh
+# IMPORTANT: Do NOT use TEST_MODE when OpenAI API key is available
+# TEST_MODE disables real AI analysis and returns mock responses
+
+# Manual startup (start.sh script not available)
+# Start backend and frontend is served at root /
 ```
 
 ### Testing
@@ -25,8 +28,9 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 # Figure analysis API test (primary test suite)
 python "test scripts"/test_figure_analysis.py
 
-# Test mode for development (disables vision API calls)
-TEST_MODE=1 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+# Test mode ONLY when no API keys available (disables vision API calls)
+# WARNING: Only use when OPENAI_API_KEY and OPENROUTER_API_KEY are missing
+# TEST_MODE=1 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 # Legacy tests (from trip planner - for reference)
 python "test scripts"/test_api.py
@@ -47,8 +51,9 @@ This is the **BioRender Figure Feedback Agent** - an AI-powered system for analy
 ### Core Components
 - **Backend**: FastAPI application (`backend/main.py`) serving both API and static frontend
 - **Frontend**: Single-page HTML application with Tailwind CSS (`frontend/index.html`)
-- **Multi-Agent System**: 4 specialized LangGraph agents executing in parallel
+- **Multi-Agent System**: 5 specialized LangGraph agents executing in parallel
 - **Figure Processing**: Image and JSON structure analysis capabilities
+- **Real-time Progress**: WebSocket support for live agent progress updates
 - **Observability**: Optional Arize/OpenInference tracing
 
 ### Multi-Agent System Design
@@ -91,10 +96,12 @@ START → [Visual Design, Communication, Scientific, Content Interpretation] (pa
 - CORS middleware enabled for frontend access
 - Pydantic models for request/response validation (`FigureAnalysisRequest`, `FigureAnalysisResponse`)
 - Main endpoints: `POST /analyze-figure` and `POST /analyze-figure-upload`
+- WebSocket endpoints: `POST /analyze-figure/ws/{session_id}` and `WS /ws/{session_id}`
 - Health check: `GET /health`
 - Static frontend served at root `/`
 - File upload handling with multipart/form-data support
 - BASE64 image encoding for JSON API endpoint
+- Real-time progress updates via WebSocket connections
 
 ## Environment Configuration
 
@@ -108,7 +115,8 @@ OPENROUTER_API_KEY=your_openrouter_key
 OPENROUTER_MODEL=openai/gpt-4o-mini
 
 # Optional: Development mode (disables vision analysis)
-TEST_MODE=1
+# WARNING: Do NOT use TEST_MODE when API keys are available - it returns mock data
+# TEST_MODE=1
 
 # Optional: Observability/Tracing
 ARIZE_SPACE_ID=your_space_id
@@ -142,20 +150,29 @@ Copy from `backend/env_example.txt` to get started.
 backend/
 ├── main.py              # FastAPI app with multi-agent system
 ├── requirements.txt     # Python dependencies
+├── pyproject.toml       # Python project configuration
+├── Dockerfile          # Docker container configuration
+├── env_example.txt      # Environment template
 ├── .env                 # Environment variables (copy from env_example.txt)
 └── archive/            # Legacy implementations
 
 frontend/
-└── index.html          # Complete Tailwind CSS UI served by backend
+└── index.html          # Complete Tailwind CSS UI with real-time progress
 
 test scripts/
-├── test_api.py         # API testing
+├── test_figure_analysis.py # Primary figure analysis test suite
+├── test_api.py         # Legacy API testing  
 ├── synthetic_data_gen.py # Evaluation suite
 └── quick_test.py       # Development utilities
 
+# Documentation & Specifications
+├── CLAUDE.md           # Development guide (this file)
+├── JSON_INTELLIGENCE_SPEC.md # JSON parsing system specification
+├── BIORENDER_MCP_SPEC.md # MCP server specification
+└── README.md           # Project overview
+
 docker-compose.yml      # Container deployment
 render.yaml            # Render.com deployment config
-start.sh              # Development startup script
 ```
 
 ## Adding New Agents/Tools
@@ -188,7 +205,9 @@ def your_tool_name(query: str) -> str:
 - Verify no MemorySaver in graph compilation
 - Check parallel edges in graph construction  
 - Ensure fresh state per request
-- Use TEST_MODE=1 for development when vision API unavailable
+- NEVER use TEST_MODE=1 when OPENAI_API_KEY or OPENROUTER_API_KEY are available
+- TEST_MODE=1 only for development when NO API keys are configured
+- TEST_MODE returns mock data and disables real AI analysis
 
 **Parameter Validation:**
 - Empty optional fields should default to "" not None
@@ -209,3 +228,15 @@ def your_tool_name(query: str) -> str:
 - Monitor LLM API response times
 - Consider model selection for speed vs quality tradeoffs
 - Vision analysis adds 2-3 seconds but provides much richer interpretation
+
+**WebSocket Integration:**
+- Real-time progress updates require WebSocket connection
+- Frontend automatically connects to WebSocket for live updates
+- Agent progress cards show thinking, tool usage, and completion states
+- Use session-based endpoints (`/analyze-figure/ws/{session_id}`) for progress tracking
+
+**Known JSON Parsing Limitations:**
+- Current system has hardcoded assumptions about BioRender JSON structure
+- May return "0 elements detected" due to incorrect key assumptions
+- See `JSON_INTELLIGENCE_SPEC.md` for planned fixes to dynamic JSON parsing
+- Affects accuracy of visual design, communication, and scientific analysis
