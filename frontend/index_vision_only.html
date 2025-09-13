@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scientific Figure Feedback - Vision Analysis</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <style>
+        .spinner {
+            border: 2px solid #f3f4f6;
+            border-top: 2px solid #3b82f6;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .score-bar {
+            height: 8px;
+            border-radius: 4px;
+            transition: width 0.5s ease-in-out;
+        }
+        .feedback-text {
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
+        .recommendation-card:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        .agent-card {
+            transition: all 0.3s ease;
+            border-left: 4px solid #e5e7eb;
+        }
+        .agent-card.thinking {
+            border-left-color: #f59e0b;
+            animation: pulse 2s infinite;
+        }
+        .agent-card.using_tools {
+            border-left-color: #3b82f6;
+        }
+        .agent-card.complete {
+            border-left-color: #10b981;
+        }
+        .agent-card.error {
+            border-left-color: #ef4444;
+        }
+        .thinking-log {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+        .thinking-log.expanded {
+            max-height: 300px;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-pending { background-color: #9ca3af; }
+        .status-thinking { background-color: #f59e0b; animation: pulse 1s infinite; }
+        .status-using_tools { background-color: #3b82f6; }
+        .status-complete { background-color: #10b981; }
+        .status-error { background-color: #ef4444; }
+        .drop-zone {
+            border: 2px dashed #d1d5db;
+            border-radius: 0.5rem;
+            transition: all 0.2s ease;
+        }
+        .drop-zone.dragover {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-6xl">
+        <!-- Header -->
+        <div class="text-center mb-12">
+            <div class="flex items-center justify-center mb-4">
+                <i data-lucide="eye" class="w-8 h-8 text-blue-600 mr-3"></i>
+                <h1 class="text-4xl font-bold text-gray-900">Scientific Figure Feedback</h1>
+                <div class="ml-3 px-3 py-1 bg-blue-100 text-blue-800 text-sm font-medium rounded-full">
+                    Vision Analysis
+                </div>
+            </div>
+            <p class="text-xl text-gray-600 max-w-3xl mx-auto">
+                AI-powered analysis using advanced vision models. Upload your scientific figure image (PNG/JPG) for instant feedback on visual design, 
+                communication clarity, and scientific accuracy.
+            </p>
+            <div class="mt-4 text-sm text-gray-500 bg-blue-50 border border-blue-200 rounded-lg p-4 mx-auto max-w-2xl">
+                <i data-lucide="info" class="w-4 h-4 inline mr-2"></i>
+                <strong>Vision-Only Mode:</strong> This version analyzes your figure using AI vision models without requiring JSON structure files. 
+                Perfect for quick analysis of any scientific figure image.
+            </div>
+        </div>
+
+        <!-- Upload Section -->
+        <div class="bg-white rounded-lg shadow-sm border p-8 mb-8">
+            <div class="flex items-center mb-6">
+                <i data-lucide="upload-cloud" class="w-6 h-6 text-blue-600 mr-3"></i>
+                <h2 class="text-2xl font-semibold text-gray-900">Upload Your Figure</h2>
+            </div>
+            
+            <form id="uploadForm" class="space-y-6">
+                <!-- Image Upload - Enhanced Drop Zone -->
+                <div class="space-y-2">
+                    <label for="imageFile" class="block text-sm font-medium text-gray-700">
+                        Figure Image (PNG/JPG) *
+                    </label>
+                    <div id="dropZone" class="drop-zone p-8 text-center">
+                        <input type="file" id="imageFile" accept="image/*" required
+                               class="hidden" onchange="handleFileSelect(this, 'image-preview')">
+                        <div id="uploadPrompt">
+                            <i data-lucide="image" class="w-12 h-12 text-gray-400 mx-auto mb-4"></i>
+                            <p class="text-lg font-medium text-gray-700 mb-2">Drop your figure here or click to browse</p>
+                            <p class="text-sm text-gray-500 mb-4">PNG, JPG, or other image formats up to 10MB</p>
+                            <button type="button" onclick="document.getElementById('imageFile').click()" 
+                                    class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                                Choose File
+                            </button>
+                        </div>
+                        <div id="image-preview" class="hidden">
+                            <img class="max-w-full max-h-64 object-contain mx-auto rounded-lg shadow-md mb-4" alt="Preview">
+                            <div class="flex items-center justify-center space-x-4">
+                                <div class="flex items-center text-green-600">
+                                    <i data-lucide="check-circle" class="w-5 h-5 mr-2"></i>
+                                    <span class="font-medium">Image uploaded successfully</span>
+                                </div>
+                                <button type="button" onclick="clearImage()" 
+                                        class="text-red-600 hover:text-red-700 underline text-sm">
+                                    Remove
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Optional Context -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-2">
+                        <label for="context" class="block text-sm font-medium text-gray-700">
+                            Context (Optional)
+                        </label>
+                        <textarea id="context" rows="3" 
+                                  placeholder="Figure title, intended audience, publication target, research focus..."
+                                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"></textarea>
+                    </div>
+
+                    <div class="space-y-2">
+                        <label for="figureType" class="block text-sm font-medium text-gray-700">
+                            Figure Type (Optional)
+                        </label>
+                        <select id="figureType" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <option value="">Select figure type...</option>
+                            <option value="pathway">Biological Pathway</option>
+                            <option value="workflow">Experimental Workflow</option>
+                            <option value="mechanism">Disease/Drug Mechanism</option>
+                            <option value="timeline">Timeline/Process Flow</option>
+                            <option value="diagram">Conceptual Diagram</option>
+                            <option value="chart">Data Visualization</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Submit Buttons -->
+                <div class="text-center space-x-4">
+                    <button type="submit" id="analyzeBtn" 
+                            class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-8 rounded-lg transition-colors inline-flex items-center">
+                        <i data-lucide="brain" class="w-5 h-5 mr-2"></i>
+                        Analyze Figure
+                    </button>
+                    <button type="button" id="demoBtn" 
+                            class="bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-8 rounded-lg transition-colors inline-flex items-center">
+                        <i data-lucide="play-circle" class="w-5 h-5 mr-2"></i>
+                        Try Demo
+                    </button>
+                </div>
+                
+                <!-- Vision Analysis Notice -->
+                <div class="text-center text-sm text-gray-500 bg-gray-50 rounded-lg p-4">
+                    <i data-lucide="zap" class="w-4 h-4 inline mr-2"></i>
+                    <strong>Powered by GPT-4o Vision:</strong> Our AI analyzes your figure image directly using advanced computer vision,
+                    providing insights on visual design, scientific accuracy, and communication effectiveness.
+                </div>
+            </form>
+        </div>
+
+        <!-- Enhanced Loading State with Agent Progress -->
+        <div id="loadingState" class="bg-white rounded-lg shadow-sm border p-8 mb-8 hidden">
+            <div class="text-center mb-8">
+                <div class="spinner mx-auto mb-4"></div>
+                <h3 class="text-lg font-semibold text-gray-900 mb-2">Analyzing Your Figure</h3>
+                <p class="text-gray-600 mb-4">Our AI agents are working in parallel to evaluate your figure using vision analysis...</p>
+                <div class="bg-gray-200 rounded-full h-2 w-full max-w-md mx-auto">
+                    <div class="bg-blue-600 h-2 rounded-full transition-all duration-1000" id="progressBar" style="width: 0%"></div>
+                </div>
+                <p class="text-sm text-gray-500 mt-2" id="progressText">Initializing agents...</p>
+            </div>
+            
+            <!-- Real-time Agent Status Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                <!-- Visual Design Agent -->
+                <div id="agent-visual_design" class="agent-card bg-gray-50 rounded-lg p-4 border">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center">
+                            <span class="status-indicator status-pending"></span>
+                            <i data-lucide="palette" class="w-4 h-4 text-purple-600 mr-2"></i>
+                            <h4 class="font-medium text-sm">Visual Design</h4>
+                        </div>
+                        <span class="agent-status text-xs text-gray-500">Pending</span>
+                    </div>
+                    <div class="current-step text-xs text-gray-600 mb-1">Waiting to start...</div>
+                    <div class="thinking-messages text-xs text-gray-500 max-h-16 overflow-y-auto"></div>
+                    <button class="toggle-thinking text-xs text-blue-500 hover:underline mt-1 hidden" onclick="toggleThinking('visual_design')">Show Details</button>
+                </div>
+                
+                <!-- Communication Agent -->
+                <div id="agent-communication" class="agent-card bg-gray-50 rounded-lg p-4 border">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center">
+                            <span class="status-indicator status-pending"></span>
+                            <i data-lucide="message-circle" class="w-4 h-4 text-green-600 mr-2"></i>
+                            <h4 class="font-medium text-sm">Communication</h4>
+                        </div>
+                        <span class="agent-status text-xs text-gray-500">Pending</span>
+                    </div>
+                    <div class="current-step text-xs text-gray-600 mb-1">Waiting to start...</div>
+                    <div class="thinking-messages text-xs text-gray-500 max-h-16 overflow-y-auto"></div>
+                    <button class="toggle-thinking text-xs text-blue-500 hover:underline mt-1 hidden" onclick="toggleThinking('communication')">Show Details</button>
+                </div>
+                
+                <!-- Scientific Agent -->
+                <div id="agent-scientific" class="agent-card bg-gray-50 rounded-lg p-4 border">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center">
+                            <span class="status-indicator status-pending"></span>
+                            <i data-lucide="flask" class="w-4 h-4 text-orange-600 mr-2"></i>
+                            <h4 class="font-medium text-sm">Scientific</h4>
+                        </div>
+                        <span class="agent-status text-xs text-gray-500">Pending</span>
+                    </div>
+                    <div class="current-step text-xs text-gray-600 mb-1">Waiting to start...</div>
+                    <div class="thinking-messages text-xs text-gray-500 max-h-16 overflow-y-auto"></div>
+                    <button class="toggle-thinking text-xs text-blue-500 hover:underline mt-1 hidden" onclick="toggleThinking('scientific')">Show Details</button>
+                </div>
+                
+                <!-- Content Interpretation Agent -->
+                <div id="agent-content_interpretation" class="agent-card bg-gray-50 rounded-lg p-4 border">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center">
+                            <span class="status-indicator status-pending"></span>
+                            <i data-lucide="eye" class="w-4 h-4 text-blue-600 mr-2"></i>
+                            <h4 class="font-medium text-sm">Content</h4>
+                        </div>
+                        <span class="agent-status text-xs text-gray-500">Pending</span>
+                    </div>
+                    <div class="current-step text-xs text-gray-600 mb-1">Waiting to start...</div>
+                    <div class="thinking-messages text-xs text-gray-500 max-h-16 overflow-y-auto"></div>
+                    <button class="toggle-thinking text-xs text-blue-500 hover:underline mt-1 hidden" onclick="toggleThinking('content_interpretation')">Show Details</button>
+                </div>
+            </div>
+            
+            <!-- Synthesis Agent (appears after others complete) -->
+            <div id="agent-feedback_synthesizer" class="agent-card bg-gray-50 rounded-lg p-4 border mx-auto max-w-md hidden">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center">
+                        <span class="status-indicator status-pending"></span>
+                        <i data-lucide="brain" class="w-4 h-4 text-indigo-600 mr-2"></i>
+                        <h4 class="font-medium text-sm">Feedback Synthesizer</h4>
+                    </div>
+                    <span class="agent-status text-xs text-gray-500">Pending</span>
+                </div>
+                <div class="current-step text-xs text-gray-600 mb-1">Waiting for analysis completion...</div>
+                <div class="thinking-messages text-xs text-gray-500 max-h-16 overflow-y-auto"></div>
+                <button class="toggle-thinking text-xs text-blue-500 hover:underline mt-1 hidden" onclick="toggleThinking('feedback_synthesizer')">Show Details</button>
+            </div>
+            
+            <!-- Real-time Activity Log -->
+            <div class="mt-6">
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="font-medium text-gray-900">Live Activity</h4>
+                    <button id="clearLog" class="text-xs text-gray-500 hover:text-gray-700" onclick="clearActivityLog()">Clear</button>
+                </div>
+                <div id="activityLog" class="bg-gray-900 text-green-400 text-xs font-mono p-3 rounded max-h-32 overflow-y-auto">
+                    <div>Waiting for analysis to begin...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="resultsSection" class="hidden">
+            <!-- Score Overview -->
+            <div class="bg-white rounded-lg shadow-sm border p-8 mb-8">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center">
+                        <i data-lucide="bar-chart-3" class="w-6 h-6 text-blue-600 mr-3"></i>
+                        <h2 class="text-2xl font-semibold text-gray-900">Quality Assessment</h2>
+                    </div>
+                    <div id="overallScore" class="text-3xl font-bold text-blue-600"></div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <!-- Visual Design Score -->
+                    <div class="text-center p-4 border rounded-lg">
+                        <div class="flex items-center justify-center mb-2">
+                            <i data-lucide="palette" class="w-5 h-5 text-purple-600 mr-2"></i>
+                            <h3 class="font-semibold text-gray-900">Visual Design</h3>
+                        </div>
+                        <div id="visualScore" class="text-2xl font-bold text-purple-600 mb-2">-</div>
+                        <div class="bg-gray-200 rounded-full h-2">
+                            <div id="visualBar" class="score-bar bg-purple-600" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Communication Score -->
+                    <div class="text-center p-4 border rounded-lg">
+                        <div class="flex items-center justify-center mb-2">
+                            <i data-lucide="message-circle" class="w-5 h-5 text-green-600 mr-2"></i>
+                            <h3 class="font-semibold text-gray-900">Communication</h3>
+                        </div>
+                        <div id="commScore" class="text-2xl font-bold text-green-600 mb-2">-</div>
+                        <div class="bg-gray-200 rounded-full h-2">
+                            <div id="commBar" class="score-bar bg-green-600" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Scientific Accuracy Score -->
+                    <div class="text-center p-4 border rounded-lg">
+                        <div class="flex items-center justify-center mb-2">
+                            <i data-lucide="flask" class="w-5 h-5 text-orange-600 mr-2"></i>
+                            <h3 class="font-semibold text-gray-900">Scientific Accuracy</h3>
+                        </div>
+                        <div id="sciScore" class="text-2xl font-bold text-orange-600 mb-2">-</div>
+                        <div class="bg-gray-200 rounded-full h-2">
+                            <div id="sciBar" class="score-bar bg-orange-600" style="width: 0%"></div>
+                        </div>
+                        <div id="sciCoherence" class="text-sm text-gray-600 mt-2">Coherence: -</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Content Summary -->
+            <div class="bg-blue-50 rounded-lg border border-blue-200 p-8 mb-8">
+                <div class="flex items-center mb-4">
+                    <i data-lucide="eye" class="w-6 h-6 text-blue-600 mr-3"></i>
+                    <h2 class="text-2xl font-semibold text-gray-900">What This Figure Shows</h2>
+                </div>
+                <p class="text-sm text-blue-700 mb-4">AI vision interpretation of your figure's content and message:</p>
+                <div id="contentSummary" class="text-gray-800 text-lg leading-relaxed bg-white p-4 rounded border"></div>
+            </div>
+
+            <!-- Detailed Feedback -->
+            <div class="bg-white rounded-lg shadow-sm border p-8 mb-8">
+                <div class="flex items-center mb-6">
+                    <i data-lucide="clipboard-list" class="w-6 h-6 text-blue-600 mr-3"></i>
+                    <h2 class="text-2xl font-semibold text-gray-900">Detailed Analysis</h2>
+                </div>
+                <div id="detailedFeedback" class="feedback-text text-gray-700 leading-relaxed"></div>
+            </div>
+
+            <!-- Recommendations -->
+            <div class="bg-white rounded-lg shadow-sm border p-8 mb-8">
+                <div class="flex items-center mb-6">
+                    <i data-lucide="lightbulb" class="w-6 h-6 text-blue-600 mr-3"></i>
+                    <h2 class="text-2xl font-semibold text-gray-900">Actionable Recommendations</h2>
+                </div>
+                <div id="recommendationsList" class="space-y-4"></div>
+            </div>
+
+            <!-- Processing Time -->
+            <div class="text-center text-sm text-gray-500 mb-4">
+                Analysis completed in <span id="processingTime">-</span> seconds using vision-only analysis
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="text-center space-x-4">
+                <button onclick="resetForm()" 
+                        class="bg-gray-600 hover:bg-gray-700 text-white font-medium py-2 px-6 rounded-lg transition-colors">
+                    Analyze Another Figure
+                </button>
+                <button onclick="exportResults()" 
+                        class="bg-green-600 hover:bg-green-700 text-white font-medium py-2 px-6 rounded-lg transition-colors">
+                    Export Results
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Lucide icons
+        lucide.createIcons();
+
+        let analysisResults = null;
+        let websocket = null;
+        let sessionId = null;
+        let agentThinkingExpanded = {};
+        
+        // Drag and drop functionality
+        const dropZone = document.getElementById('dropZone');
+        const imageFile = document.getElementById('imageFile');
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+        
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+        
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+        
+        function highlight(e) {
+            dropZone.classList.add('dragover');
+        }
+        
+        function unhighlight(e) {
+            dropZone.classList.remove('dragover');
+        }
+        
+        dropZone.addEventListener('drop', handleDrop, false);
+        
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            if (files.length > 0 && files[0].type.startsWith('image/')) {
+                imageFile.files = files;
+                handleFileSelect(imageFile, 'image-preview');
+            }
+        }
+        
+        // WebSocket connection for real-time updates
+        function connectWebSocket(sessionId) {
+            const wsProtocol = 'ws:'; // Use ws for localhost
+            const wsUrl = `${wsProtocol}//localhost:8001/ws/${sessionId}`;
+            
+            websocket = new WebSocket(wsUrl);
+            
+            websocket.onopen = function(event) {
+                console.log('WebSocket connected');
+                addToActivityLog('🔗 Connected to real-time analysis');
+            };
+            
+            websocket.onmessage = function(event) {
+                const update = JSON.parse(event.data);
+                handleProgressUpdate(update);
+            };
+            
+            websocket.onclose = function(event) {
+                console.log('WebSocket closed');
+                if (event.code !== 1000) { // Not a normal closure
+                    addToActivityLog('⚠️ Connection lost - analysis will continue');
+                }
+            };
+            
+            websocket.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                addToActivityLog('❌ Connection error - falling back to standard mode');
+            };
+        }
+        
+        // Handle progress updates from WebSocket
+        function handleProgressUpdate(update) {
+            const { type, agent, message, timestamp, step, data } = update;
+            
+            // Add to activity log
+            const time = new Date(timestamp * 1000).toLocaleTimeString();
+            if (agent) {
+                addToActivityLog(`[${time}] ${agent.toUpperCase()}: ${message}`);
+            } else {
+                addToActivityLog(`[${time}] SYSTEM: ${message}`);
+            }
+            
+            // Update agent status
+            if (agent && type !== 'analysis_complete') {
+                updateAgentStatus(agent, type, step, message, data);
+            }
+            
+            // Handle different update types
+            switch (type) {
+                case 'analysis_start':
+                    document.getElementById('progressText').textContent = 'Starting multi-agent vision analysis...';
+                    break;
+                case 'agent_start':
+                    if (agent === 'feedback_synthesizer') {
+                        document.getElementById('agent-feedback_synthesizer').classList.remove('hidden');
+                    }
+                    break;
+                case 'analysis_complete':
+                    document.getElementById('progressText').textContent = 'Vision analysis completed!';
+                    document.getElementById('progressBar').style.width = '100%';
+                    break;
+            }
+        }
+        
+        // Update individual agent status
+        function updateAgentStatus(agentName, type, step, message, data) {
+            const agentCard = document.getElementById(`agent-${agentName}`);
+            if (!agentCard) return;
+            
+            const statusIndicator = agentCard.querySelector('.status-indicator');
+            const statusText = agentCard.querySelector('.agent-status');
+            const currentStep = agentCard.querySelector('.current-step');
+            const thinkingMessages = agentCard.querySelector('.thinking-messages');
+            const toggleButton = agentCard.querySelector('.toggle-thinking');
+            
+            // Update status based on type
+            let status = 'pending';
+            let statusLabel = 'Pending';
+            
+            if (type === 'agent_start' || type === 'agent_thinking') {
+                status = 'thinking';
+                statusLabel = 'Thinking';
+            } else if (type === 'tool_call') {
+                status = 'using_tools';
+                statusLabel = 'Using Tools';
+            } else if (type === 'agent_complete') {
+                status = 'complete';
+                statusLabel = 'Complete';
+            }
+            
+            // Update UI elements
+            agentCard.className = agentCard.className.replace(/agent-card\s+(\w+)?/, `agent-card ${status}`);
+            statusIndicator.className = statusIndicator.className.replace(/status-\w+/, `status-${status}`);
+            statusText.textContent = statusLabel;
+            
+            if (step) {
+                currentStep.textContent = step.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            }
+            
+            // Add thinking message
+            if (type === 'agent_thinking' && message) {
+                const messageDiv = document.createElement('div');
+                messageDiv.textContent = `• ${message}`;
+                messageDiv.className = 'mb-1';
+                thinkingMessages.appendChild(messageDiv);
+                thinkingMessages.scrollTop = thinkingMessages.scrollHeight;
+                
+                // Show toggle button if there are messages
+                if (thinkingMessages.children.length > 0) {
+                    toggleButton.classList.remove('hidden');
+                }
+            }
+            
+            // Add confidence score if available
+            if (data && data.confidence) {
+                const confidence = Math.round(data.confidence * 100);
+                statusText.textContent += ` (${confidence}% confident)`;
+            }
+        }
+        
+        // Toggle thinking details for an agent
+        function toggleThinking(agentName) {
+            const expanded = agentThinkingExpanded[agentName] || false;
+            agentThinkingExpanded[agentName] = !expanded;
+            
+            const agentCard = document.getElementById(`agent-${agentName}`);
+            const thinkingMessages = agentCard.querySelector('.thinking-messages');
+            const toggleButton = agentCard.querySelector('.toggle-thinking');
+            
+            if (agentThinkingExpanded[agentName]) {
+                thinkingMessages.style.maxHeight = '200px';
+                toggleButton.textContent = 'Hide Details';
+            } else {
+                thinkingMessages.style.maxHeight = '64px';
+                toggleButton.textContent = 'Show Details';
+            }
+        }
+        
+        // Add message to activity log
+        function addToActivityLog(message) {
+            const log = document.getElementById('activityLog');
+            const messageDiv = document.createElement('div');
+            messageDiv.textContent = message;
+            log.appendChild(messageDiv);
+            log.scrollTop = log.scrollHeight;
+        }
+        
+        // Clear activity log
+        function clearActivityLog() {
+            const log = document.getElementById('activityLog');
+            log.innerHTML = '<div>Log cleared...</div>';
+        }
+
+        function handleFileSelect(input, previewId) {
+            const file = input.files[0];
+            const preview = document.getElementById(previewId);
+            const uploadPrompt = document.getElementById('uploadPrompt');
+            
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const img = preview.querySelector('img');
+                    img.src = e.target.result;
+                    preview.classList.remove('hidden');
+                    uploadPrompt.classList.add('hidden');
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+        
+        function clearImage() {
+            document.getElementById('imageFile').value = '';
+            document.getElementById('image-preview').classList.add('hidden');
+            document.getElementById('uploadPrompt').classList.remove('hidden');
+        }
+
+        async function analyzeWithFiles() {
+            const imageFileInput = document.getElementById('imageFile').files[0];
+            const context = document.getElementById('context').value;
+            const figureType = document.getElementById('figureType').value;
+            
+            if (!imageFileInput) {
+                alert('Please upload a figure image, or use the "Try Demo" button for a demonstration.');
+                return false;
+            }
+            
+            return await uploadAndAnalyze(imageFileInput, context, figureType);
+        }
+
+        async function analyzeDemo() {
+            // Create mock data for demo
+            const canvas = document.createElement('canvas');
+            canvas.width = 600;
+            canvas.height = 400;
+            const ctx = canvas.getContext('2d');
+            
+            // Draw a more detailed mock scientific figure
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, 600, 400);
+            
+            // Draw cellular components
+            ctx.fillStyle = '#e3f2fd';
+            ctx.fillRect(50, 100, 120, 80);
+            ctx.strokeStyle = '#1976d2';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(50, 100, 120, 80);
+            
+            ctx.fillStyle = '#f3e5f5';
+            ctx.fillRect(250, 200, 120, 80);
+            ctx.strokeStyle = '#7b1fa2';
+            ctx.strokeRect(250, 200, 120, 80);
+            
+            ctx.fillStyle = '#e8f5e8';
+            ctx.fillRect(430, 120, 120, 80);
+            ctx.strokeStyle = '#388e3c';
+            ctx.strokeRect(430, 120, 120, 80);
+            
+            // Draw arrows
+            ctx.strokeStyle = '#d32f2f';
+            ctx.lineWidth = 3;
+            // Arrow 1
+            ctx.beginPath();
+            ctx.moveTo(170, 140);
+            ctx.lineTo(250, 200);
+            drawArrowHead(ctx, 250, 200, Math.atan2(60, 80));
+            ctx.stroke();
+            
+            // Arrow 2
+            ctx.beginPath();
+            ctx.moveTo(370, 240);
+            ctx.lineTo(430, 180);
+            drawArrowHead(ctx, 430, 180, Math.atan2(-60, 60));
+            ctx.stroke();
+            
+            // Add text labels
+            ctx.fillStyle = 'black';
+            ctx.font = 'bold 14px Arial';
+            ctx.fillText('Cell Receptor', 60, 135);
+            ctx.fillText('Signal Cascade', 255, 235);
+            ctx.fillText('Gene Expression', 435, 155);
+            
+            ctx.font = 'bold 18px Arial';
+            ctx.fillText('Demo: Signal Transduction Pathway', 150, 40);
+            
+            // Add molecular details
+            ctx.font = '12px Arial';
+            ctx.fillStyle = '#666';
+            ctx.fillText('Ligand binding', 65, 155);
+            ctx.fillText('Protein activation', 265, 255);
+            ctx.fillText('Transcription', 445, 175);
+            
+            // Convert canvas to blob
+            return new Promise((resolve) => {
+                canvas.toBlob(async (blob) => {
+                    const context = document.getElementById('context').value || 'Demo pathway analysis - Signal transduction cascade showing ligand-receptor interaction leading to gene expression changes';
+                    const figureType = document.getElementById('figureType').value || 'pathway';
+                    
+                    const result = await uploadAndAnalyze(blob, context, figureType);
+                    resolve(result);
+                });
+            });
+        }
+        
+        function drawArrowHead(ctx, x, y, angle) {
+            const headlen = 10;
+            ctx.moveTo(x, y);
+            ctx.lineTo(x - headlen * Math.cos(angle - Math.PI/6), y - headlen * Math.sin(angle - Math.PI/6));
+            ctx.moveTo(x, y);
+            ctx.lineTo(x - headlen * Math.cos(angle + Math.PI/6), y - headlen * Math.sin(angle + Math.PI/6));
+        }
+
+        async function uploadAndAnalyze(imageFile, context, figureType) {
+            // Generate session ID and connect WebSocket
+            sessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+            connectWebSocket(sessionId);
+
+            // Show loading state
+            document.getElementById('loadingState').classList.remove('hidden');
+            document.getElementById('resultsSection').classList.add('hidden');
+            
+            // Reset agent states
+            resetAgentStates();
+            
+            // Animate progress bar
+            const progressBar = document.getElementById('progressBar');
+            let width = 0;
+            const interval = setInterval(() => {
+                width += Math.random() * 10;
+                if (width > 90) {
+                    clearInterval(interval);
+                } else {
+                    progressBar.style.width = width + '%';
+                }
+            }, 500);
+            
+            try {
+                const formData = new FormData();
+                formData.append('image', imageFile);
+                formData.append('context', context);
+                formData.append('figure_type', figureType);
+                
+                // Use WebSocket-enabled endpoint (port 8001 for vision-only)
+                const baseUrl = 'http://localhost:8001';
+                const endpoint = websocket && websocket.readyState === WebSocket.OPEN 
+                    ? `${baseUrl}/analyze-figure/upload/${sessionId}`
+                    : `${baseUrl}/analyze-figure/upload`;
+                
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Server Error (${response.status}): ${errorText}`);
+                }
+                
+                const results = await response.json();
+                analysisResults = results;
+                
+                // Complete progress bar
+                clearInterval(interval);
+                progressBar.style.width = '100%';
+                
+                // Show results after a brief delay
+                setTimeout(() => {
+                    displayResults(results);
+                    document.getElementById('loadingState').classList.add('hidden');
+                    document.getElementById('resultsSection').classList.remove('hidden');
+                    
+                    // Close WebSocket connection
+                    if (websocket) {
+                        websocket.close();
+                        websocket = null;
+                    }
+                    
+                    // Scroll to results
+                    document.getElementById('resultsSection').scrollIntoView({ 
+                        behavior: 'smooth',
+                        block: 'start'
+                    });
+                }, 1000);
+                
+                return true;
+                
+            } catch (error) {
+                clearInterval(interval);
+                document.getElementById('loadingState').classList.add('hidden');
+                alert('Analysis failed: ' + error.message);
+                
+                // Close WebSocket connection on error
+                if (websocket) {
+                    websocket.close();
+                    websocket = null;
+                }
+                
+                return false;
+            }
+        }
+        
+        // Reset agent states to initial pending state
+        function resetAgentStates() {
+            const agents = ['visual_design', 'communication', 'scientific', 'content_interpretation', 'feedback_synthesizer'];
+            
+            agents.forEach(agentName => {
+                const agentCard = document.getElementById(`agent-${agentName}`);
+                if (!agentCard) return;
+                
+                // Reset classes and status
+                agentCard.className = 'agent-card bg-gray-50 rounded-lg p-4 border';
+                const statusIndicator = agentCard.querySelector('.status-indicator');
+                const statusText = agentCard.querySelector('.agent-status');
+                const currentStep = agentCard.querySelector('.current-step');
+                const thinkingMessages = agentCard.querySelector('.thinking-messages');
+                const toggleButton = agentCard.querySelector('.toggle-thinking');
+                
+                statusIndicator.className = 'status-indicator status-pending';
+                statusText.textContent = 'Pending';
+                currentStep.textContent = 'Waiting to start...';
+                thinkingMessages.innerHTML = '';
+                toggleButton.classList.add('hidden');
+                
+                // Hide synthesizer initially
+                if (agentName === 'feedback_synthesizer') {
+                    agentCard.classList.add('hidden');
+                }
+            });
+            
+            // Reset activity log
+            const log = document.getElementById('activityLog');
+            log.innerHTML = '<div>Waiting for analysis to begin...</div>';
+            
+            // Reset progress
+            document.getElementById('progressBar').style.width = '0%';
+            document.getElementById('progressText').textContent = 'Initializing vision agents...';
+        }
+
+        // Event handlers
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            await analyzeWithFiles();
+        });
+        
+        document.getElementById('demoBtn').addEventListener('click', async function(e) {
+            e.preventDefault();
+            await analyzeDemo();
+        });
+
+        function displayResults(results) {
+            // Update scores
+            document.getElementById('overallScore').textContent = results.overall_score + '/30';
+            document.getElementById('visualScore').textContent = results.visual_design_score + '/10';
+            document.getElementById('commScore').textContent = results.communication_score + '/10';
+            document.getElementById('sciScore').textContent = results.scientific_accuracy_score + '/10';
+            
+            // Update progress bars with animation
+            setTimeout(() => {
+                document.getElementById('visualBar').style.width = (results.visual_design_score * 10) + '%';
+                document.getElementById('commBar').style.width = (results.communication_score * 10) + '%';
+                document.getElementById('sciBar').style.width = (results.scientific_accuracy_score * 10) + '%';
+            }, 300);
+            
+            // Display content summary
+            document.getElementById('contentSummary').textContent = results.content_summary || 'No content summary available';
+            
+            // Display detailed feedback
+            document.getElementById('detailedFeedback').textContent = results.feedback;
+
+            // Display scientific coherence (1-5) with reason under Scientific Accuracy
+            const sciCoherenceEl = document.getElementById('sciCoherence');
+            if (results.scientific_coherence_score) {
+                const reason = results.scientific_coherence_reason ? ` — ${results.scientific_coherence_reason}` : '';
+                sciCoherenceEl.textContent = `Coherence: ${results.scientific_coherence_score}/5${reason}`;
+                sciCoherenceEl.classList.remove('hidden');
+            } else {
+                sciCoherenceEl.textContent = 'Coherence: N/A';
+            }
+            
+            // Display recommendations
+            const recList = document.getElementById('recommendationsList');
+            recList.innerHTML = '';
+            
+            if (results.recommendations && results.recommendations.length > 0) {
+                results.recommendations.forEach(rec => {
+                    const priority = rec.priority === 'high' ? 'border-red-200 bg-red-50' : 'border-yellow-200 bg-yellow-50';
+                    const icon = rec.category === 'visual' ? 'palette' : 
+                               rec.category === 'communication' ? 'message-circle' : 'flask';
+                    const color = rec.category === 'visual' ? 'purple' : 
+                                rec.category === 'communication' ? 'green' : 'orange';
+                    
+                    const recCard = document.createElement('div');
+                    recCard.className = `recommendation-card border-l-4 border-${color}-500 ${priority} p-4 rounded-lg transition-all duration-200`;
+                    recCard.innerHTML = `
+                        <div class="flex items-start">
+                            <i data-lucide="${icon}" class="w-5 h-5 text-${color}-600 mr-3 mt-0.5"></i>
+                            <div class="flex-1">
+                                <div class="flex items-center justify-between">
+                                    <span class="font-medium text-gray-900 capitalize">${rec.category}</span>
+                                    <span class="text-xs px-2 py-1 rounded-full ${rec.priority === 'high' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}">
+                                        ${rec.priority} priority
+                                    </span>
+                                </div>
+                                <p class="text-gray-700 mt-1">${rec.text}</p>
+                            </div>
+                        </div>
+                    `;
+                    recList.appendChild(recCard);
+                });
+            } else {
+                recList.innerHTML = '<p class="text-gray-500 italic">No specific recommendations - your figure meets quality standards!</p>';
+            }
+            
+            // Update processing time
+            document.getElementById('processingTime').textContent = results.processing_time.toFixed(2);
+            
+            // Re-initialize Lucide icons for new elements
+            lucide.createIcons();
+        }
+
+        function resetForm() {
+            // Reset form
+            document.getElementById('uploadForm').reset();
+            clearImage();
+            
+            // Hide results and loading
+            document.getElementById('resultsSection').classList.add('hidden');
+            document.getElementById('loadingState').classList.add('hidden');
+            
+            // Close WebSocket if open
+            if (websocket) {
+                websocket.close();
+                websocket = null;
+            }
+            
+            // Reset session
+            sessionId = null;
+            agentThinkingExpanded = {};
+            
+            // Scroll to top
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function exportResults() {
+            if (!analysisResults) return;
+            
+            const exportData = {
+                timestamp: new Date().toISOString(),
+                analysis_type: 'vision_only',
+                scores: {
+                    visual_design: analysisResults.visual_design_score,
+                    communication: analysisResults.communication_score,
+                    scientific_accuracy: analysisResults.scientific_accuracy_score,
+                    overall: analysisResults.overall_score,
+                    scientific_coherence_1_5: analysisResults.scientific_coherence_score || null
+                },
+                scientific_coherence_reason: analysisResults.scientific_coherence_reason || null,
+                content_summary: analysisResults.content_summary,
+                feedback: analysisResults.feedback,
+                recommendations: analysisResults.recommendations,
+                processing_time: analysisResults.processing_time
+            };
+            
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], 
+                                 { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `figure-analysis-vision-${Date.now()}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>

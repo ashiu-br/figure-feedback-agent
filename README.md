@@ -42,7 +42,8 @@ docker-compose up --build
 - `backend/`: FastAPI app (`main.py`), multi-agent figure analysis system, tracing hooks.
 - `frontend/index.html`: Figure upload interface with drag-and-drop, demo functionality.
 - `test scripts/`: `test_figure_analysis.py` for API testing with mock scientific figures.
-- Root: `start.sh`, `docker-compose.yml`, `README.md`, `figure_feedback_agent_prd.md`.
+- `specs/`: canonical specifications (e.g., `JSON_INTELLIGENCE_SPEC.md`, `figure_feedback_agent_prd.md`, `scoring_system_improvements.md`).
+- Root: `start.sh`, `docker-compose.yml`, `README.md`.
 
 ## Development Commands
 - Backend (dev): `cd backend && source .venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8000 --reload`

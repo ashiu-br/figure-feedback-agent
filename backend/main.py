@@ -21,14 +21,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Minimal observability via Arize/OpenInference (optional)
+# Arize AX Observability Setup
 try:
     from arize.otel import register
     from openinference.instrumentation.langchain import LangChainInstrumentor
     from openinference.instrumentation.litellm import LiteLLMInstrumentor
     from openinference.instrumentation import using_prompt_template
+    from opentelemetry import trace
+    from opentelemetry.trace import Status, StatusCode
     _TRACING = True
-except Exception:
+    logger.info("Arize AX tracing modules loaded successfully")
+except ImportError as e:
+    logger.warning(f"Arize tracing not available: {e}")
     def using_prompt_template(**kwargs):  # type: ignore
         from contextlib import contextmanager
         @contextmanager
@@ -93,7 +97,6 @@ class ProgressUpdate(TypedDict):
 # Figure state for LangGraph
 class FigureState(TypedDict):
     image_data: str
-    json_structure: Dict[str, Any]
     context: Optional[str]
     figure_type: Optional[str]
     visual_analysis: Optional[str]
@@ -261,8 +264,12 @@ Please analyze the image and provide a plain language interpretation."""
 
 
 @tool
-def analyze_visual_design(image_data: str, json_structure: dict, context: str = "") -> str:
-    """Analyze visual design aspects of the figure including color usage, layout, hierarchy, typography, and spacing."""
+def analyze_visual_design(image_data: str, json_structure: dict, context: str = "", content_summary: str = "") -> str:
+    """Analyze visual design aspects of the figure including color usage, layout, hierarchy, typography, and spacing.
+    
+    Args:
+        content_summary: Plain language description of what the figure communicates (from content interpretation)
+    """
     
     # Analyze JSON structure for visual elements
     elements = []
@@ -318,7 +325,20 @@ def analyze_visual_design(image_data: str, json_structure: dict, context: str = 
     # Layout analysis
     layout_feedback = "→ Consider white space: Ensure adequate spacing between elements for visual clarity"
     
-    return f"""VISUAL DESIGN ANALYSIS (Score: {color_score}/10):
+    # Content-aware recommendations
+    content_context = ""
+    if content_summary:
+        content_context = f"\n📋 Content Context: {content_summary[:100]}{'...' if len(content_summary) > 100 else ''}\n"
+        
+        # Adjust recommendations based on content
+        if "pathway" in content_summary.lower():
+            layout_feedback += "\n→ For pathway figures: Use directional flow to guide reader through process"
+            color_feedback += "\n→ Consider color-coding different pathway components or stages"
+        elif "comparison" in content_summary.lower():
+            layout_feedback += "\n→ For comparison figures: Ensure visual balance between compared elements"
+            color_feedback += "\n→ Use contrasting colors to distinguish compared items clearly"
+
+    return f"""VISUAL DESIGN ANALYSIS (Score: {color_score}/10):{content_context}
 
 🎨 Color Usage:
 {color_feedback}
@@ -342,8 +362,12 @@ def analyze_visual_design(image_data: str, json_structure: dict, context: str = 
 
 
 @tool 
-def evaluate_communication_clarity(json_structure: dict, context: str = "", figure_type: str = "") -> str:
-    """Evaluate communication clarity including logical flow, information density, and audience appropriateness."""
+def evaluate_communication_clarity(json_structure: dict, context: str = "", figure_type: str = "", content_summary: str = "") -> str:
+    """Evaluate communication clarity including logical flow, information density, and audience appropriateness.
+    
+    Args:
+        content_summary: Plain language description of what the figure communicates (from content interpretation)
+    """
     
     elements = []
     if 'objects' in json_structure:
@@ -386,7 +410,21 @@ def evaluate_communication_clarity(json_structure: dict, context: str = "", figu
     # Overall communication score
     overall_score = int((density_score + flow_score) / 2)
     
-    return f"""COMMUNICATION CLARITY ANALYSIS (Score: {overall_score}/10):
+    # Content-aware feedback
+    content_context = ""
+    message_alignment = ""
+    if content_summary:
+        content_context = f"\n📋 Content Context: {content_summary[:100]}{'...' if len(content_summary) > 100 else ''}\n"
+        
+        # Check if design supports the identified message
+        if "pathway" in content_summary.lower() and arrows_or_connectors < 2:
+            message_alignment = "\n⚠️ Message-Design Mismatch: Figure describes a pathway but lacks sufficient flow indicators"
+        elif "comparison" in content_summary.lower() and total_elements < 4:
+            message_alignment = "\n⚠️ Message-Design Mismatch: Figure describes comparisons but has few elements to compare"
+        elif arrows_or_connectors > 5 and "process" not in content_summary.lower():
+            message_alignment = "\n⚠️ Message-Design Mismatch: Many flow indicators but content doesn't describe a clear process"
+    
+    return f"""COMMUNICATION CLARITY ANALYSIS (Score: {overall_score}/10):{content_context}{message_alignment}
 
 🎯 Information Flow:
 {flow_feedback}
@@ -411,8 +449,12 @@ def evaluate_communication_clarity(json_structure: dict, context: str = "", figu
 
 
 @tool
-def validate_scientific_accuracy(json_structure: dict, context: str = "", figure_type: str = "") -> str:
-    """Validate scientific accuracy including nomenclature, pathway logic, and field conventions."""
+def validate_scientific_accuracy(json_structure: dict, context: str = "", figure_type: str = "", content_summary: str = "") -> str:
+    """Validate scientific accuracy including nomenclature, pathway logic, and field conventions.
+    
+    Args:
+        content_summary: Plain language description of what the figure communicates (from content interpretation)
+    """
     
     elements = []
     if 'objects' in json_structure:
@@ -472,7 +514,21 @@ def validate_scientific_accuracy(json_structure: dict, context: str = "", figure
     if not accuracy_issues:
         accuracy_issues.append("→ Scientific content appears accurate based on available information")
     
-    return f"""SCIENTIFIC ACCURACY ANALYSIS (Score: {accuracy_score}/10):
+    # Content-aware accuracy assessment
+    content_context = ""
+    scientific_alignment = ""
+    if content_summary:
+        content_context = f"\n📋 Content Context: {content_summary[:100]}{'...' if len(content_summary) > 100 else ''}\n"
+        
+        # Check for content-specific accuracy concerns
+        if "pathway" in content_summary.lower():
+            scientific_alignment = "\n🔬 Pathway-Specific Check: Verify directional relationships match established biological mechanisms"
+        elif "mechanism" in content_summary.lower():
+            scientific_alignment = "\n🔬 Mechanism-Specific Check: Ensure molecular interactions follow known biochemical principles"
+        elif "process" in content_summary.lower():
+            scientific_alignment = "\n🔬 Process-Specific Check: Validate temporal sequence matches biological timing"
+    
+    return f"""SCIENTIFIC ACCURACY ANALYSIS (Score: {accuracy_score}/10):{content_context}{scientific_alignment}
 
 🔬 Nomenclature Check:
 {"".join(f"\\n{issue}" for issue in accuracy_issues[:2])}
@@ -629,10 +685,14 @@ async def visual_design_agent(state: FigureState):
     
     await asyncio.sleep(0.5)  # Simulate tool execution time
     
+    # Reference content interpretation for context-aware analysis
+    content_summary = state.get("content_interpretation", "")
+    
     analysis = analyze_visual_design.invoke({
         "image_data": state["image_data"],
-        "json_structure": state["json_structure"],
-        "context": state.get("context", "")
+        "json_structure": state.get("json_structure", {}),
+        "context": state.get("context", ""),
+        "content_summary": content_summary
     })
     
     # Complete agent execution
@@ -689,10 +749,14 @@ async def communication_agent(state: FigureState):
     await send_progress(state, "tool_call", agent_name, "Executing communication clarity tool...", "tool_execution")
     await asyncio.sleep(0.4)
     
+    # Reference content interpretation for context-aware analysis
+    content_summary = state.get("content_interpretation", "")
+    
     analysis = evaluate_communication_clarity.invoke({
-        "json_structure": state["json_structure"],
+        "json_structure": state.get("json_structure", {}),
         "context": state.get("context", ""),
-        "figure_type": state.get("figure_type", "")
+        "figure_type": state.get("figure_type", ""),
+        "content_summary": content_summary
     })
     
     # Complete agent execution
@@ -749,10 +813,14 @@ async def scientific_agent(state: FigureState):
     await send_progress(state, "tool_call", agent_name, "Executing scientific accuracy validation tool...", "tool_execution")
     await asyncio.sleep(0.6)
     
+    # Reference content interpretation for context-aware analysis
+    content_summary = state.get("content_interpretation", "")
+    
     analysis = validate_scientific_accuracy.invoke({
-        "json_structure": state["json_structure"],
+        "json_structure": state.get("json_structure", {}),
         "context": state.get("context", ""),
-        "figure_type": state.get("figure_type", "")
+        "figure_type": state.get("figure_type", ""),
+        "content_summary": content_summary
     })
     
     # Complete agent execution
@@ -770,59 +838,20 @@ async def scientific_agent(state: FigureState):
     }
 
 
-async def content_interpretation_agent(state: FigureState):
-    """Agent focused on interpreting figure content with thinking simulation."""
-    agent_name = "content_interpretation"
+async def content_interpretation_step(state: FigureState):
+    """Simple preprocessing step to interpret figure content before analysis."""
     
-    # Initialize agent progress
-    if "agent_progress" not in state:
-        state["agent_progress"] = {}
+    await send_progress(state, "agent_start", "content_interpretation", "Interpreting figure content...", "content_analysis")
     
-    state["agent_progress"][agent_name] = AgentProgress(
-        status="thinking",
-        current_step="initialization",
-        thinking_messages=[],
-        tool_calls=[],
-        start_time=time.time(),
-        completion_time=None,
-        confidence=None
-    )
-    
-    await send_progress(state, "agent_start", agent_name, "Starting content interpretation...", "initialization")
-    
-    # Simulate thinking process
-    thinking_steps = [
-        ("visual_parsing", "Parsing visual elements and their relationships...", 1.0),
-        ("content_extraction", "Extracting key information and concepts...", 1.4),
-        ("context_integration", "Integrating with provided context and figure type...", 0.8),
-        ("summary_generation", "Generating plain language interpretation...", 1.2)
-    ]
-    
-    for step, message, delay in thinking_steps:
-        state["agent_progress"][agent_name]["current_step"] = step
-        state["agent_progress"][agent_name]["thinking_messages"].append(message)
-        await send_progress(state, "agent_thinking", agent_name, message, step)
-        await asyncio.sleep(delay)
-    
-    # Tool execution
-    state["agent_progress"][agent_name]["status"] = "using_tools"
-    await send_progress(state, "tool_call", agent_name, "Executing content interpretation tool...", "tool_execution")
-    await asyncio.sleep(0.7)
-    
+    # Direct call to content interpretation (no complex agent wrapper)
     interpretation = interpret_figure_content.invoke({
         "image_data": state["image_data"],
-        "json_structure": state["json_structure"],
+        "json_structure": state.get("json_structure", {}),  # Handle missing JSON gracefully
         "context": state.get("context", ""),
         "figure_type": state.get("figure_type", "")
     })
     
-    # Complete agent execution
-    state["agent_progress"][agent_name]["status"] = "complete"
-    state["agent_progress"][agent_name]["completion_time"] = time.time()
-    state["agent_progress"][agent_name]["confidence"] = 0.81
-    
-    await send_progress(state, "agent_complete", agent_name, "Content interpretation completed", "complete", {
-        "confidence": 0.81,
+    await send_progress(state, "agent_complete", "content_interpretation", "Content interpretation completed", "complete", {
         "findings": "Generated plain language summary of figure content and message"
     })
     
@@ -875,7 +904,7 @@ async def feedback_synthesizer_agent(state: FigureState):
         "communication_analysis": state["communication_analysis"],
         "scientific_analysis": state["scientific_analysis"],
         "image_data": state["image_data"],
-        "json_structure": state["json_structure"]
+        "json_structure": state.get("json_structure", {})
     })
     
     # Extract scores for response
@@ -953,27 +982,28 @@ async def feedback_synthesizer_agent(state: FigureState):
 # === LANGGRAPH SETUP ===
 
 def build_graph():
-    """Build the figure analysis workflow graph with async support."""
+    """Build the figure analysis workflow graph with content-first architecture."""
     workflow = StateGraph(FigureState)
     
-    # Add nodes with async agent functions
+    # Add nodes - content interpretation first, then parallel analysis agents
+    workflow.add_node("content_interpretation", content_interpretation_step)
     workflow.add_node("visual_design", visual_design_agent)
     workflow.add_node("communication", communication_agent)
     workflow.add_node("scientific", scientific_agent)
-    workflow.add_node("content_interpretation", content_interpretation_agent)
     workflow.add_node("feedback_synthesizer", feedback_synthesizer_agent)
     
-    # Parallel execution: START -> [visual, communication, scientific, content_interpretation]
-    workflow.add_edge(START, "visual_design")
-    workflow.add_edge(START, "communication")
-    workflow.add_edge(START, "scientific")
+    # Content-first flow: START -> content_interpretation -> [3 parallel agents] -> synthesizer
     workflow.add_edge(START, "content_interpretation")
     
-    # All analyses feed into synthesizer
+    # After content interpretation, run analysis agents in parallel
+    workflow.add_edge("content_interpretation", "visual_design")
+    workflow.add_edge("content_interpretation", "communication") 
+    workflow.add_edge("content_interpretation", "scientific")
+    
+    # All analysis agents feed into synthesizer
     workflow.add_edge("visual_design", "feedback_synthesizer")
     workflow.add_edge("communication", "feedback_synthesizer")
     workflow.add_edge("scientific", "feedback_synthesizer")
-    workflow.add_edge("content_interpretation", "feedback_synthesizer")
     
     # End after synthesis
     workflow.add_edge("feedback_synthesizer", END)
@@ -1020,14 +1050,50 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize tracing if available
+# Note: Removed custom AttributeSizeProcessor as it was interfering with trace export
+# Arize handles large attribute truncation automatically
+
+# Initialize Arize AX tracing if credentials available
 if _TRACING and os.getenv("ARIZE_SPACE_ID") and os.getenv("ARIZE_API_KEY"):
-    register(
-        space_id=os.getenv("ARIZE_SPACE_ID", ""),
-        api_key=os.getenv("ARIZE_API_KEY", ""),
-    )
-    LangChainInstrumentor().instrument()
-    LiteLLMInstrumentor().instrument()
+    try:
+        # Register with Arize AX (production-optimized)
+        from arize.otel import Transport
+        tracer_provider = register(
+            space_id=os.getenv("ARIZE_SPACE_ID", ""),
+            api_key=os.getenv("ARIZE_API_KEY", ""),
+            project_name=os.getenv("ARIZE_PROJECT_NAME", "biorender-figure-feedback-agent"),
+            endpoint="https://otlp.arize.com/v1/traces",  # HTTP transport for reliability
+            transport=Transport.HTTP,  # More reliable than gRPC for this setup
+            # batch=True (default) for production efficiency
+            # log_to_console=False (default) for production
+        )
+        
+        # Note: Custom span processors can interfere with trace export
+        # Use Arize's built-in size limits instead of custom processors
+        
+        # Instrument LangChain components
+        LangChainInstrumentor().instrument(
+            tracer_provider=tracer_provider
+        )
+        
+        # Instrument LiteLLM for direct LLM calls
+        LiteLLMInstrumentor().instrument(
+            tracer_provider=tracer_provider
+        )
+        
+        logger.info("✅ Arize AX observability initialized successfully")
+        logger.info(f"🔍 View traces at: https://app.arize.com/spaces/{os.getenv('ARIZE_SPACE_ID')}/projects/{os.getenv('ARIZE_PROJECT_NAME', 'biorender-figure-feedback-agent')}")
+        logger.info(f"📡 Tracing endpoint: otlp.arize.com")
+        logger.info(f"🏷️  Project: {os.getenv('ARIZE_PROJECT_NAME', 'biorender-figure-feedback-agent')}")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Arize tracing: {e}")
+        _TRACING = False
+else:
+    if not os.getenv("ARIZE_SPACE_ID") or not os.getenv("ARIZE_API_KEY"):
+        logger.info("ℹ️ Arize credentials not provided - running without observability")
+    else:
+        logger.warning("⚠️ Arize tracing modules not available")
 
 # Helper function to send progress updates
 async def send_progress(state: FigureState, update_type: str, agent: str = None, message: str = "", step: str = None, data: Dict[str, Any] = None):
@@ -1082,6 +1148,120 @@ async def _analyze_figure_internal(request: FigureAnalysisRequest, websocket: An
     """Internal function to analyze figure with optional WebSocket support."""
     start_time = time.time()
     
+    # Create tracing context for the entire analysis
+    if _TRACING:
+        tracer = trace.get_tracer(__name__)
+        with tracer.start_as_current_span(
+            "figure_analysis_workflow",
+            attributes={
+                "figure.type": request.figure_type or "unknown",
+                "figure.has_context": bool(request.context),
+                "figure.context_length": len(request.context or ""),
+                "figure.has_websocket": websocket is not None,
+                "figure.session_id": session_id or "none",
+                "figure.image_size_bytes": len(request.image_data) if request.image_data else 0,
+                "figure.json_elements": len(request.json_structure) if request.json_structure else 0,
+                "figure.context_preview": (request.context or "")[:100] if request.context else ""
+            }
+        ) as span:
+            return await _run_analysis_with_tracing(request, websocket, session_id, start_time, span)
+    else:
+        return await _run_analysis_without_tracing(request, websocket, session_id, start_time)
+
+async def _run_analysis_with_tracing(request: FigureAnalysisRequest, websocket: Any, session_id: str, start_time: float, span):
+    """Run analysis with tracing context."""
+    try:
+        logger.info(f"Starting figure analysis - figure_type: {request.figure_type}, context length: {len(request.context or '')}")
+        
+        # Build the analysis workflow
+        graph = build_graph()
+        
+        # Initialize state with WebSocket support
+        initial_state: FigureState = {
+            "image_data": request.image_data,
+            "json_structure": request.json_structure,
+            "context": request.context,
+            "figure_type": request.figure_type,
+            "visual_analysis": None,
+            "communication_analysis": None,
+            "scientific_analysis": None,
+            "content_interpretation": None,
+            "feedback_summary": None,
+            "quality_scores": None,
+            "agent_progress": {},
+            "websocket": websocket,
+            "session_id": session_id
+        }
+        
+        logger.info("Invoking LangGraph workflow...")
+        
+        # Send initial progress update
+        if websocket and session_id:
+            await send_progress(initial_state, "analysis_start", None, "Starting multi-agent analysis...", "initialization")
+        
+        # Run the analysis with async support
+        result = await graph.ainvoke(initial_state)
+        
+        processing_time = time.time() - start_time
+        logger.info(f"Analysis completed in {processing_time:.2f}s")
+        
+        # Add success metrics to span
+        span.set_attribute("analysis.processing_time", processing_time)
+        span.set_attribute("analysis.success", True)
+        
+        if result.get("quality_scores"):
+            scores = result["quality_scores"]
+            span.set_attribute("analysis.visual_score", scores.get("visual_design", 0))
+            span.set_attribute("analysis.communication_score", scores.get("communication", 0))
+            span.set_attribute("analysis.scientific_score", scores.get("scientific_accuracy", 0))
+            span.set_attribute("analysis.overall_score", scores.get("overall", 0))
+        
+        span.set_status(Status(StatusCode.OK, "Analysis completed successfully"))
+        
+        # Extract recommendations from feedback
+        recommendations = []
+        feedback_text = result.get("feedback_summary", "")
+        
+        # Parse recommendations from feedback text
+        if "→" in feedback_text:
+            rec_lines = [line.strip() for line in feedback_text.split("\n") if "→" in line]
+            for line in rec_lines:
+                rec_text = line.replace("→", "").strip()
+                if rec_text:
+                    recommendations.append({
+                        "text": rec_text,
+                        "priority": "high" if "HIGH PRIORITY" in line else "medium",
+                        "category": "visual" if "color" in rec_text.lower() or "layout" in rec_text.lower() 
+                                 else "communication" if "flow" in rec_text.lower() or "clarity" in rec_text.lower()
+                                 else "scientific"
+                    })
+        
+        scores = result.get("quality_scores", {})
+        
+        return FigureAnalysisResponse(
+            visual_design_score=scores.get("visual_design", 8),
+            communication_score=scores.get("communication", 8),
+            scientific_accuracy_score=scores.get("scientific_accuracy", 9),
+            overall_score=scores.get("overall", 25),
+            content_summary=result.get("content_interpretation", "No content summary available"),
+            feedback=feedback_text,
+            recommendations=recommendations,
+            processing_time=processing_time
+        )
+        
+    except Exception as e:
+        logger.error(f"Analysis failed: {str(e)}")
+        logger.error(f"Full traceback: {traceback.format_exc()}")
+        
+        # Record error in trace
+        span.set_status(Status(StatusCode.ERROR, f"Analysis failed: {str(e)}"))
+        span.set_attribute("error.type", type(e).__name__)
+        span.set_attribute("error.message", str(e))
+        
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+async def _run_analysis_without_tracing(request: FigureAnalysisRequest, websocket: Any, session_id: str, start_time: float):
+    """Run analysis without tracing (fallback)."""
     try:
         logger.info(f"Starting figure analysis - figure_type: {request.figure_type}, context length: {len(request.context or '')}")
         

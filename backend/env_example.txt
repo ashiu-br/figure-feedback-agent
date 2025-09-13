@@ -5,10 +5,11 @@ TAVILY_API_KEY=your_tavily_api_key_here
 # Weather API configuration
 OPENWEATHER_API_KEY=your_openweather_api_key_here
 
-# Arize observability configuration (required for tracing)
-# Get these from https://app.arize.com
+# Arize AX observability configuration (optional for tracing)
+# Get these from https://app.arize.com - required for LLM tracing and agent observability
 ARIZE_SPACE_ID=your_arize_space_id_here
 ARIZE_API_KEY=your_arize_api_key_here
+ARIZE_PROJECT_NAME=biorender-figure-feedback-agent
 
 # Airtable configuration (optional - for data labeling)
 # Get these from https://airtable.com/account

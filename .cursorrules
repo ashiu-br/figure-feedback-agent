@@ -28,18 +28,28 @@ START → [Visual Design, Communication, Scientific, Content Interpretation] (pa
 ```
 
 ### Vision-LLM Integration
-- **Hybrid Approach**: Primary vision analysis using GPT-4o-mini vision API
+- **Hybrid Approach**: Primary vision analysis using GPT-4o-mini vision API (original system)
+- **Vision-Only Mode**: Pure GPT-4o vision analysis without JSON requirements (vision-only system)
 - **Graceful Fallback**: JSON-based interpretation when vision unavailable or in TEST_MODE
 - **Error Handling**: Robust fallback system ensures consistent content interpretation
 - **Development Mode**: TEST_MODE=1 disables vision calls for faster development
 
 ### Key Files
-- `backend/main.py` - Core application with figure analysis agents and API endpoints
-- `frontend/index.html` - Complete frontend UI with file upload and demo functionality
+- `backend/main.py` - Core application with figure analysis agents and API endpoints (JSON + Image)
+- `backend/main_vision_only.py` - Vision-only application for image-only analysis (Image only)
+- `frontend/index.html` - Complete frontend UI with file upload and demo functionality (JSON + Image)
+- `frontend/index_vision_only.html` - Vision-only UI with drag-and-drop (Image only)
 - `backend/requirements.txt` - Python dependencies including Pillow for image processing
 - `test scripts/test_figure_analysis.py` - Primary test suite for figure analysis
-- `figure_feedback_agent_prd.md` - Product requirements document
+- `test_vision_only.py` - Vision-only analysis test script
+- `specs/figure_feedback_agent_prd.md` - Product requirements document
 - `docker-compose.yml` - Container orchestration
+
+### Specifications
+- Canonical specs live under `specs/` (source of truth):
+  - `specs/JSON_INTELLIGENCE_SPEC.md`
+  - `specs/figure_feedback_agent_prd.md`
+  - `specs/scoring_system_improvements.md`
 
 ## Code Patterns & Best Practices
 
@@ -101,6 +111,10 @@ ARIZE_API_KEY=xxx
 - Optional tracing based on environment variables
 - Track tool calls and agent executions
 - Monitor vision API usage and fallback frequency
+- **WARNING**: Avoid custom span processors unless absolutely necessary - they often break export
+- If custom processors needed, ensure they delegate to original exporters
+- Always test tracing with `log_to_console=True` during development
+- Arize dashboard may take 2-5 minutes to show traces (normal ingestion delay)
 
 ## Development Guidelines
 
@@ -144,12 +158,14 @@ ARIZE_API_KEY=xxx
 
 ### Testing
 - Primary test: `python "test scripts"/test_figure_analysis.py`
+- Vision-only test: `python test_vision_only.py`
 - Test both TEST_MODE and full vision mode
 - Test file upload and JSON API endpoints
 - Verify parallel agent execution
 - Check tracing output in Arize (if configured)
 - Test frontend functionality including demo mode
 - Verify graceful fallback from vision to JSON analysis
+- Test both original and vision-only systems
 
 ## API Integration Guidelines
 
@@ -195,6 +211,16 @@ Add new API keys to:
 - NEVER use TEST_MODE=1 when API keys are available - it returns mock data instead of real AI analysis
 - TEST_MODE=1 ONLY when no OPENAI_API_KEY or OPENROUTER_API_KEY are configured
 
+### Observability Troubleshooting
+**Root Cause Analysis for Missing Traces:**
+1. **Check console output first**: Use `log_to_console=True` to verify spans are being created
+2. **Custom processors**: Most common cause - they replace default exporters instead of adding to them
+3. **Silent failures**: OpenTelemetry often fails silently without error messages
+4. **Transport issues**: Try HTTP if gRPC fails: `transport=Transport.HTTP`
+5. **Dashboard delays**: Normal 2-5 minute ingestion lag for traces to appear
+6. **Project naming**: Verify correct project name in dashboard URL
+7. **Environment variables**: Ensure ARIZE_SPACE_ID and ARIZE_API_KEY are loaded correctly
+
 ### Parameter Validation
 - Use `context or ""` instead of `context if context else None`
 - Handle empty optional fields properly
@@ -210,6 +236,12 @@ Add new API keys to:
 - Initialize tracing at module level, not per request
 - Check Arize credentials in environment
 - Verify instrumentor versions compatibility
+- **CRITICAL**: Custom span processors can break trace export entirely
+- OpenTelemetry's `add_span_processor()` **overwrites** default processors, not adds to them
+- Use `log_to_console=True` for debugging trace flow - essential for troubleshooting
+- Custom processors must implement full export logic, not just filtering
+- Silent failures are common - no error messages when spans aren't exported
+- Test with HTTP transport if gRPC fails: `transport=Transport.HTTP, endpoint="https://otlp.arize.com/v1/traces"`
 
 ### Performance
 - Confirm parallel agent execution working
@@ -284,4 +316,79 @@ The project is designed for extension to Phase 2:
 - Advanced scientific accuracy validation
 - Enhanced visual design rules
 
-When making changes, always consider the multi-agent architecture, maintain the parallel execution pattern, and ensure proper fallback mechanisms for reliable operation across different deployment environments.
+## Vision-Only System Architecture
+
+### Overview
+The vision-only implementation provides a streamlined alternative to the original system, focusing purely on GPT-4o vision analysis without requiring JSON structure files.
+
+### Key Implementation Differences
+
+**Backend (`main_vision_only.py`):**
+- Simplified `FigureAnalysisRequest` model (no `json_structure` field)
+- All analysis tools use GPT-4o vision directly instead of JSON parsing
+- Same multi-agent architecture and WebSocket progress tracking
+- Removed hybrid vision/JSON fallback logic
+
+**Frontend (`index_vision_only.html`):**
+- Removed JSON file upload UI entirely
+- Enhanced drag-and-drop image upload with visual feedback
+- "Vision Analysis" branding and messaging
+- Same real-time progress tracking capabilities
+
+### When to Use Each System
+
+**Original System (main.py + index.html):**
+- BioRender-generated figures with JSON structure available
+- Need detailed structural analysis (exact element counts, colors)
+- Want hybrid vision + JSON analysis for maximum accuracy
+- Working with specific BioRender export format
+
+**Vision-Only System (main_vision_only.py + index_vision_only.html):**
+- Any scientific figure image (PNG/JPG) from any source
+- Quick analysis without JSON structure requirements
+- Broader compatibility and simpler user workflow
+- Users who only have image files available
+
+### Development Commands
+
+```bash
+# Original system
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+# Vision-only system  
+uvicorn main_vision_only:app --host 0.0.0.0 --port 8001 --reload
+
+# Vision-only testing
+python test_vision_only.py
+```
+
+### Code Patterns for Vision-Only
+
+**Analysis Tool Pattern:**
+```python
+@tool
+def analyze_visual_design(image_data: str, context: str = "") -> str:
+    # Use GPT-4o vision directly
+    messages = [
+        SystemMessage(content="Analyze visual design..."),
+        HumanMessage(content=[
+            {"type": "text", "text": context_text},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+        ])
+    ]
+    vision_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2)
+    response = vision_llm.invoke(messages)
+    return response.content.strip()
+```
+
+**State Management:**
+```python
+# Simplified state without json_structure
+class FigureState(TypedDict):
+    image_data: str
+    context: Optional[str]
+    figure_type: Optional[str]
+    # No json_structure field needed
+```
+
+When making changes, always consider the multi-agent architecture, maintain the parallel execution pattern, and ensure proper fallback mechanisms for reliable operation across different deployment environments. Consider whether changes should be applied to both systems or are specific to one implementation.

@@ -38,20 +38,25 @@ A multi-agent AI system that analyzes both the visual image and structured JSON 
 
 ### Agent Architecture (Leveraging Existing Framework)
 
-**Phase 1 (Analysis Only) - IMPLEMENTED:**
+**Phase 1 (Analysis Only) - UPDATED ARCHITECTURE:**
 ```
-START → [Visual Design, Communication, Scientific, Content Interpretation] → Feedback Synthesizer → END
-```
-
-**Phase 4 (Analysis + Implementation):**
-```
-START → [Visual Design, Communication, Scientific] → Feedback Synthesizer → Implementation Generator → END
+START → Content Interpretation → [Visual Design, Communication, Scientific] → Feedback Synthesizer → END
 ```
 
-**Visual Design Agent**: Analyzes color usage, layout, visual hierarchy, typography, spacing
-**Communication Agent**: Evaluates clarity, logical flow, audience appropriateness, information density  
-**Scientific Agent**: Validates accuracy, nomenclature, conventions, pathway logic
-**Content Interpretation Agent**: Generates plain language summaries using hybrid vision-LLM approach with JSON fallback
+**Key Architectural Improvement**: **Content-First Processing**
+- **Problem**: Previous parallel execution had agents analyzing figures without understanding their intended message
+- **Solution**: Content interpretation now happens first, providing context for all subsequent analysis
+- **Benefit**: Context-aware analysis enables more intelligent, targeted recommendations
+
+**Phase 2 (Analysis + Implementation):**
+```
+START → Content Interpretation → [Visual Design, Communication, Scientific] → Feedback Synthesizer → Implementation Generator → END
+```
+
+**Content Interpretation Step**: Generates plain language summaries using hybrid vision-LLM approach with JSON fallback (preprocessing step)
+**Visual Design Agent (Content-Aware)**: Analyzes color usage, layout, visual hierarchy, typography, spacing with context-specific recommendations
+**Communication Agent (Content-Aware)**: Evaluates clarity, logical flow, audience appropriateness, information density with message-design alignment validation
+**Scientific Agent (Content-Aware)**: Validates accuracy, nomenclature, conventions, pathway logic with content-specific accuracy checks
 **Feedback Synthesizer Agent**: Creates prioritized, actionable recommendations with specific examples
 **Implementation Generator Agent**: Converts recommendations into executable JSON modifications with preview generation
 
