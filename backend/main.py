@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import os
@@ -12,7 +13,18 @@ import traceback
 import asyncio
 from datetime import datetime
 from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv())
+from pathlib import Path
+
+# Robust .env loading: try multiple locations without overriding existing env
+try:
+    env_file = os.getenv("ENV_FILE")
+    if env_file and Path(env_file).exists():
+        load_dotenv(env_file, override=False)
+    load_dotenv(Path(__file__).with_name(".env"), override=False)
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+    load_dotenv(find_dotenv(), override=False)
+except Exception:
+    pass
 
 # Configure logging
 logging.basicConfig(
@@ -249,11 +261,20 @@ JSON Structure Preview: {json_summary}
 
 Please analyze the image and provide a plain language interpretation."""
 
+    # Prefer public URL when available so Arize can render images in traces
+    try:
+        if os.getenv("PUBLIC_BASE_URL"):
+            image_ref = {"type": "image_url", "image_url": {"url": _persist_image_and_get_url(image_data)}}
+        else:
+            image_ref = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+    except Exception:
+        image_ref = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+
     messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=[
             {"type": "text", "text": context_text},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+            image_ref,
         ])
     ]
     
@@ -1019,6 +1040,43 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Static media serving for persisted input images (useful for Arize/AX rendering)
+MEDIA_DIR = Path(__file__).parent / "media"
+try:
+    MEDIA_DIR.mkdir(exist_ok=True)
+except Exception:
+    # If directory creation fails (e.g., readonly FS), proceed without raising
+    pass
+app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
+
+def _persist_image_and_get_url(image_b64: str, session_id: str | None = None) -> str:
+    """Persist base64 image under backend/media and return a URL.
+
+    If PUBLIC_BASE_URL is set (e.g., to an ngrok/Cloudflare tunnel or production host),
+    returns an absolute HTTPS URL that Arize can fetch. Otherwise returns an app-relative
+    path (may not be reachable by external services).
+    """
+    try:
+        import uuid
+        from urllib.parse import urljoin
+
+        # Ensure media directory exists
+        MEDIA_DIR.mkdir(exist_ok=True)
+
+        fname = f"{(session_id or uuid.uuid4().hex)}.png"
+        fpath = MEDIA_DIR / fname
+        # Write bytes (overwrite if same name reused for session)
+        fpath.write_bytes(base64.b64decode(image_b64))
+
+        base = os.getenv("PUBLIC_BASE_URL") or os.getenv("RENDER_EXTERNAL_URL")
+        if base:
+            return urljoin(base.rstrip("/") + "/", f"media/{fname}")
+        # Fallback to app-relative path (works locally in browser; not externally fetchable)
+        return f"/media/{fname}"
+    except Exception as _e:
+        logger.debug(f"Image persist failed, using data URI only: {_e}")
+        return f"data:image/png;base64,{image_b64}"
+
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
@@ -1192,6 +1250,15 @@ async def _run_analysis_with_tracing(request: FigureAnalysisRequest, websocket: 
             "websocket": websocket,
             "session_id": session_id
         }
+
+        # Attach a publicly reachable image URL to the span when possible
+        try:
+            if request.image_data:
+                image_url_for_span = _persist_image_and_get_url(request.image_data, session_id)
+                # If we don't have a PUBLIC_BASE_URL, this may be a relative path
+                span.set_attribute("figure.image_url", image_url_for_span)
+        except Exception as _e:
+            logger.debug(f"Unable to attach image URL to span: {_e}")
         
         logger.info("Invoking LangGraph workflow...")
         

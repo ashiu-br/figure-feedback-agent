@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import os
@@ -12,7 +13,23 @@ import traceback
 import asyncio
 from datetime import datetime
 from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv())
+from pathlib import Path
+
+# Robust .env loading: try multiple locations without overriding existing env
+try:
+    # 1) Explicit ENV_FILE if provided
+    env_file = os.getenv("ENV_FILE")
+    if env_file and Path(env_file).exists():
+        load_dotenv(env_file, override=False)
+    # 2) backend/.env (next to this file)
+    load_dotenv(Path(__file__).with_name(".env"), override=False)
+    # 3) repo root .env (one level up from backend/)
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+    # 4) fallback search from CWD
+    load_dotenv(find_dotenv(), override=False)
+except Exception:
+    # Fall back silently if dotenv not available; env vars may still be set
+    pass
 
 # Configure logging
 logging.basicConfig(
@@ -173,11 +190,19 @@ Provide specific, actionable feedback with a score out of 10. Focus on design pr
         
         context_text = f"Context: {context or 'Scientific figure analysis'}\n\nPlease analyze the visual design aspects and provide scored feedback."
         
+        try:
+            if os.getenv("PUBLIC_BASE_URL"):
+                image_ref = {"type": "image_url", "image_url": {"url": _persist_image_and_get_url(image_data)}}
+            else:
+                image_ref = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+        except Exception:
+            image_ref = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=[
                 {"type": "text", "text": context_text},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+                image_ref,
             ])
         ]
         
@@ -248,11 +273,19 @@ Provide specific feedback with a score out of 10. Focus on how effectively the f
         
         context_text = f"Context: {context or 'Scientific figure analysis'}\nFigure Type: {figure_type or 'general'}\n\nPlease analyze the communication effectiveness."
         
+        try:
+            if os.getenv("PUBLIC_BASE_URL"):
+                image_ref = {"type": "image_url", "image_url": {"url": _persist_image_and_get_url(image_data)}}
+            else:
+                image_ref = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+        except Exception:
+            image_ref = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=[
                 {"type": "text", "text": context_text},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+                image_ref,
             ])
         ]
         
@@ -329,11 +362,19 @@ Provide specific feedback with a score out of 10. Focus on scientific validity a
         
         context_text = f"Context: {context or 'Scientific figure analysis'}\nFigure Type: {figure_type or 'general'}\n\nPlease analyze the scientific accuracy."
         
+        try:
+            if os.getenv("PUBLIC_BASE_URL"):
+                image_ref = {"type": "image_url", "image_url": {"url": _persist_image_and_get_url(image_data)}}
+            else:
+                image_ref = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+        except Exception:
+            image_ref = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=[
                 {"type": "text", "text": context_text},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+                image_ref,
             ])
         ]
         
@@ -394,11 +435,19 @@ Figure Type: {figure_type or 'diagram'}
 
 Please analyze the image and provide a plain language interpretation."""
 
+        try:
+            if os.getenv("PUBLIC_BASE_URL"):
+                image_ref = {"type": "image_url", "image_url": {"url": _persist_image_and_get_url(image_data)}}
+            else:
+                image_ref = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+        except Exception:
+            image_ref = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=[
                 {"type": "text", "text": context_text},
-                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+                image_ref,
             ])
         ]
         
@@ -911,6 +960,37 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Static media serving for persisted input images
+MEDIA_DIR = Path(__file__).parent / "media"
+try:
+    MEDIA_DIR.mkdir(exist_ok=True)
+except Exception:
+    pass
+app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
+
+def _persist_image_and_get_url(image_b64: str, session_id: str | None = None) -> str:
+    """Persist base64 image under backend/media and return a URL.
+
+    Uses PUBLIC_BASE_URL when present to form an absolute URL for external fetchers.
+    Falls back to an app-relative path if not set.
+    """
+    try:
+        import uuid
+        from urllib.parse import urljoin
+
+        MEDIA_DIR.mkdir(exist_ok=True)
+        fname = f"{(session_id or uuid.uuid4().hex)}.png"
+        fpath = MEDIA_DIR / fname
+        fpath.write_bytes(base64.b64decode(image_b64))
+
+        base = os.getenv("PUBLIC_BASE_URL") or os.getenv("RENDER_EXTERNAL_URL")
+        if base:
+            return urljoin(base.rstrip("/") + "/", f"media/{fname}")
+        return f"/media/{fname}"
+    except Exception as _e:
+        logger.debug(f"Image persist failed, using data URI only: {_e}")
+        return f"data:image/png;base64,{image_b64}"
+
 # WebSocket connection manager
 class ConnectionManager:
     def __init__(self):
@@ -973,9 +1053,12 @@ if _TRACING and os.getenv("ARIZE_SPACE_ID") and os.getenv("ARIZE_API_KEY"):
         )
         
         logger.info("✅ Arize AX observability initialized successfully (Vision-Only)")
-        logger.info(f"🔍 View traces at: https://app.arize.com/spaces/{os.getenv('ARIZE_SPACE_ID')}/projects/{os.getenv('ARIZE_PROJECT_NAME', 'figure-feedback-agent-vision')}")
-        logger.info(f"📡 Tracing endpoint: otlp.arize.com")
-        logger.info(f"🏷️  Project: {os.getenv('ARIZE_PROJECT_NAME', 'figure-feedback-agent-vision')}")
+        # Ensure the project name printed matches the one used for registration
+        proj = os.getenv('ARIZE_PROJECT_NAME', 'figure-feedback-agent')
+        space = os.getenv('ARIZE_SPACE_ID')
+        logger.info(f"🔍 View traces at: https://app.arize.com/spaces/{space}/projects/{proj}")
+        logger.info("📡 Tracing endpoint: otlp.arize.com")
+        logger.info(f"🏷️  Project: {proj}")
         
     except Exception as e:
         logger.error(f"❌ Failed to initialize Arize tracing: {e}")
@@ -1071,6 +1154,15 @@ async def _analyze_figure_internal(request: FigureAnalysisRequest, websocket: An
         
         processing_time = time.time() - start_time
         logger.info(f"Analysis completed in {processing_time:.2f}s")
+        
+        # Proactively flush spans so they appear promptly in Arize
+        try:
+            if _TRACING:
+                provider = trace.get_tracer_provider()
+                flush_result = getattr(provider, "force_flush", lambda: None)()
+                logger.info("Tracing: force_flush invoked after request")
+        except Exception as _e:
+            logger.debug(f"Tracing flush skipped: {_e}")
         
         # Extract recommendations from feedback
         recommendations = []
