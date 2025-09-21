@@ -513,39 +513,116 @@ Please analyze the image and provide a plain language interpretation."""
 
 
 @tool
-def synthesize_feedback(visual_analysis: str, communication_analysis: str, scientific_analysis: str) -> str:
-    """Synthesize all agent analyses into prioritized, actionable feedback with overall scores."""
-    
+def generate_actionable_recommendations(visual_analysis: str, communication_analysis: str, scientific_analysis: str, content_interpretation: str, context: str = "") -> str:
+    """Generate exactly 3 specific, actionable recommendations using LLM analysis of all agent findings."""
+
+    if os.getenv("TEST_MODE"):
+        return """RECOMMENDATION 1 (Priority: HIGH - Visual Design)
+Issue: Too many colors creating visual confusion
+Action: Reduce color palette to 3-4 colors maximum. Use blue as primary highlight, gray for secondary elements, and black for text. Reserve bright colors only for critical elements.
+
+RECOMMENDATION 2 (Priority: MEDIUM - Communication)
+Issue: Information flow is unclear
+Action: Add numbered sequence indicators (1→2→3) and directional arrows between process steps. Reorganize elements left-to-right following logical sequence.
+
+RECOMMENDATION 3 (Priority: MEDIUM - Typography)
+Issue: Inconsistent text hierarchy impacting readability
+Action: Standardize all element labels to size 12pt, pathway names to 14pt bold, and main title to 18pt. Ensure minimum 4px spacing between text and element borders."""
+
+    try:
+        system_prompt = """You are an expert scientific figure consultant. Based on the provided analyses, generate exactly 3 specific, actionable recommendations that the user can immediately implement.
+
+Each recommendation must follow this exact format:
+
+RECOMMENDATION X (Priority: HIGH/MEDIUM/LOW - Category)
+Issue: [Specific problem identified]
+Action: [Detailed, implementable steps with specific values/measurements]
+
+Requirements:
+- Recommendations must be specific and actionable (e.g., "Use Arial 12pt font" not "improve typography")
+- Include specific values, measurements, colors, or techniques where possible
+- Priority should reflect impact on figure effectiveness
+- Categories: Visual Design, Communication, Scientific Accuracy, Typography, Layout
+- Focus on the most impactful changes that can be made immediately
+- Draw from specific issues mentioned in the analyses
+- Limit each Action to 2-3 sentences maximum
+
+Generate exactly 3 recommendations, prioritized by impact."""
+
+        user_prompt = f"""Content Summary: {content_interpretation}
+
+Visual Design Analysis:
+{visual_analysis}
+
+Communication Analysis:
+{communication_analysis}
+
+Scientific Analysis:
+{scientific_analysis}
+
+Context: {context or 'Scientific figure analysis'}
+
+Please generate 3 specific, actionable recommendations based on the most critical issues identified across all analyses."""
+
+        llm_local = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, max_tokens=600)
+
+        with using_prompt_template(
+            template=system_prompt,
+            variables={
+                "content_interpretation": content_interpretation[:200] + "..." if len(content_interpretation) > 200 else content_interpretation,
+                "visual_analysis": visual_analysis[:300] + "..." if len(visual_analysis) > 300 else visual_analysis,
+                "communication_analysis": communication_analysis[:300] + "..." if len(communication_analysis) > 300 else communication_analysis,
+                "scientific_analysis": scientific_analysis[:300] + "..." if len(scientific_analysis) > 300 else scientific_analysis,
+                "context": context,
+            },
+            version="recommendations-v1.0",
+        ):
+            response = llm_local.invoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ])
+
+        return response.content.strip()
+
+    except Exception as e:
+        logger.warning(f"Recommendation generation failed: {e}")
+        return """RECOMMENDATION 1 (Priority: HIGH - Visual Design)
+Issue: Visual elements may need optimization
+Action: Review color palette for consistency and ensure high contrast between text and background. Consider using a maximum of 4 colors for clarity.
+
+RECOMMENDATION 2 (Priority: MEDIUM - Communication)
+Issue: Information flow could be enhanced
+Action: Add directional indicators or arrows to show sequence. Group related elements using consistent spacing and alignment.
+
+RECOMMENDATION 3 (Priority: MEDIUM - Scientific Accuracy)
+Issue: Scientific conventions should be verified
+Action: Cross-reference terminology with standard databases (UniProt, KEGG). Ensure abbreviations follow field-specific conventions and add confidence indicators where appropriate."""
+
+
+@tool
+def synthesize_feedback(visual_analysis: str, communication_analysis: str, scientific_analysis: str, content_interpretation: str, context: str = "") -> str:
+    """Synthesize all agent analyses into prioritized, actionable feedback with overall scores and specific recommendations."""
+
     # Extract scores from analyses
     visual_score = 8  # default
     comm_score = 8
     sci_score = 9
-    
+
     # Parse scores from analysis text
     visual_match = re.search(r'Score:\s*(\d+)', visual_analysis)
     if visual_match:
         visual_score = int(visual_match.group(1))
-    
+
     comm_match = re.search(r'Score:\s*(\d+)', communication_analysis)
     if comm_match:
         comm_score = int(comm_match.group(1))
-        
+
     sci_match = re.search(r'Score:\s*(\d+)', scientific_analysis)
     if sci_match:
         sci_score = int(sci_match.group(1))
-    
+
     overall_score = visual_score + comm_score + sci_score
-    
-    # Determine priority recommendations
-    priority_recs = []
-    
-    if visual_score < 7:
-        priority_recs.append("🎨 Visual Design (HIGH PRIORITY)")
-    if comm_score < 7:
-        priority_recs.append("🎯 Communication Clarity (HIGH PRIORITY)")
-    if sci_score < 8:
-        priority_recs.append("🔬 Scientific Accuracy (HIGH PRIORITY)")
-    
+
     # Overall assessment
     if overall_score >= 25:
         assessment = "Excellent - Publication ready"
@@ -555,13 +632,36 @@ def synthesize_feedback(visual_analysis: str, communication_analysis: str, scien
         assessment = "Needs improvement - Address key issues"
     else:
         assessment = "Major revisions needed"
-    
+
+    # Generate 3 specific actionable recommendations
+    try:
+        actionable_recommendations = generate_actionable_recommendations.invoke({
+            "visual_analysis": visual_analysis,
+            "communication_analysis": communication_analysis,
+            "scientific_analysis": scientific_analysis,
+            "content_interpretation": content_interpretation,
+            "context": context
+        })
+    except Exception as e:
+        logger.warning(f"Failed to generate actionable recommendations: {e}")
+        actionable_recommendations = """RECOMMENDATION 1 (Priority: HIGH - Visual Design)
+Issue: Visual elements need optimization
+Action: Review and improve visual hierarchy, color usage, and spacing for better clarity.
+
+RECOMMENDATION 2 (Priority: MEDIUM - Communication)
+Issue: Information flow could be enhanced
+Action: Improve logical sequence and add directional indicators where needed.
+
+RECOMMENDATION 3 (Priority: MEDIUM - Scientific Accuracy)
+Issue: Scientific conventions should be verified
+Action: Cross-reference terminology and ensure adherence to field standards."""
+
     return f"""📊 FIGURE QUALITY ASSESSMENT
 
 🎨 VISUAL DESIGN (Score: {visual_score}/10)
 {visual_analysis.split(':', 1)[1] if ':' in visual_analysis else visual_analysis}
 
-🎯 COMMUNICATION (Score: {comm_score}/10)  
+🎯 COMMUNICATION (Score: {comm_score}/10)
 {communication_analysis.split(':', 1)[1] if ':' in communication_analysis else communication_analysis}
 
 🔬 SCIENTIFIC ACCURACY (Score: {sci_score}/10)
@@ -569,14 +669,14 @@ def synthesize_feedback(visual_analysis: str, communication_analysis: str, scien
 
 📈 OVERALL IMPACT SCORE: {overall_score}/30 ({assessment})
 
-{"🚨 PRIORITY ACTIONS:" if priority_recs else "✅ OPTIONAL ENHANCEMENTS:"}
-{chr(10).join(f"→ {rec}" for rec in priority_recs) if priority_recs else "→ Figure meets quality standards - consider minor refinements"}
+🎯 ACTIONABLE RECOMMENDATIONS:
+{actionable_recommendations}
 
-💡 IMPLEMENTATION ORDER:
-1. Address any scientific accuracy issues first
-2. Improve visual hierarchy and color usage
-3. Enhance communication flow and clarity
-4. Final polish and consistency check"""
+💡 IMPLEMENTATION PRIORITY:
+1. Address HIGH priority recommendations first
+2. Implement MEDIUM priority recommendations for enhancement
+3. Validate changes against scientific standards
+4. Review overall visual consistency and polish"""
 
 
 # === AGENT IMPLEMENTATIONS ===
@@ -933,7 +1033,9 @@ async def feedback_synthesizer_agent(state: FigureState):
     feedback = synthesize_feedback.invoke({
         "visual_analysis": state["visual_analysis"],
         "communication_analysis": state["communication_analysis"],
-        "scientific_analysis": state["scientific_analysis"]
+        "scientific_analysis": state["scientific_analysis"],
+        "content_interpretation": state.get("content_interpretation", ""),
+        "context": state.get("context", "")
     })
     
     # Extract scores for response
@@ -1224,11 +1326,60 @@ async def _analyze_figure_internal(request: FigureAnalysisRequest, websocket: An
         except Exception as _e:
             logger.debug(f"Tracing flush skipped: {_e}")
         
-        # Extract recommendations from feedback
+        # Extract structured recommendations from feedback
         recommendations = []
         feedback_text = result.get("feedback_summary", "")
-        
-        if "→" in feedback_text:
+
+        # Parse new structured recommendation format
+        if "RECOMMENDATION" in feedback_text:
+            # Split by RECOMMENDATION blocks
+            rec_blocks = re.split(r'RECOMMENDATION \d+', feedback_text)
+
+            for block in rec_blocks[1:]:  # Skip first empty block
+                if not block.strip():
+                    continue
+
+                # Extract priority and category from first line
+                first_line_match = re.search(r'\(Priority:\s*(HIGH|MEDIUM|LOW)\s*-\s*([^)]+)\)', block)
+                priority = "medium"  # default
+                category = "general"  # default
+
+                if first_line_match:
+                    priority = first_line_match.group(1).lower()
+                    category = first_line_match.group(2).strip().lower()
+                    # Normalize category names
+                    if "visual" in category or "design" in category:
+                        category = "visual"
+                    elif "communication" in category:
+                        category = "communication"
+                    elif "scientific" in category:
+                        category = "scientific"
+                    elif "typography" in category:
+                        category = "visual"  # Typography is visual design
+                    elif "layout" in category:
+                        category = "visual"  # Layout is visual design
+
+                # Extract issue and action
+                issue_match = re.search(r'Issue:\s*(.+?)(?=\nAction:|$)', block, re.DOTALL)
+                action_match = re.search(r'Action:\s*(.+?)(?=\n\n|\nRECOMMENDATION|$)', block, re.DOTALL)
+
+                issue = issue_match.group(1).strip() if issue_match else "Issue not specified"
+                action = action_match.group(1).strip() if action_match else "Action not specified"
+
+                # Clean up text (remove extra whitespace/newlines)
+                issue = ' '.join(issue.split())
+                action = ' '.join(action.split())
+
+                recommendations.append({
+                    "text": f"{issue} - {action}",
+                    "priority": priority,
+                    "category": category,
+                    "issue": issue,
+                    "action": action
+                })
+
+        # Fallback to old format if new format not found
+        elif "→" in feedback_text:
             rec_lines = [line.strip() for line in feedback_text.split("\n") if "→" in line]
             for line in rec_lines:
                 rec_text = line.replace("→", "").strip()
@@ -1236,9 +1387,11 @@ async def _analyze_figure_internal(request: FigureAnalysisRequest, websocket: An
                     recommendations.append({
                         "text": rec_text,
                         "priority": "high" if "HIGH PRIORITY" in line else "medium",
-                        "category": "visual" if "color" in rec_text.lower() or "layout" in rec_text.lower() 
+                        "category": "visual" if "color" in rec_text.lower() or "layout" in rec_text.lower()
                                  else "communication" if "flow" in rec_text.lower() or "clarity" in rec_text.lower()
-                                 else "scientific"
+                                 else "scientific",
+                        "issue": rec_text,
+                        "action": rec_text
                     })
         
         scores = result.get("quality_scores", {})

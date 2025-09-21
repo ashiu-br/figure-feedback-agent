@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-### Backend Development
+### Backend Development - VISION-ONLY FOCUS
+**Current development is focused exclusively on the vision-only system. The main system (vision+JSON parsing) is paused.**
+
 ```bash
 # ALWAYS use virtual environment first
 cd backend && python3 -m venv .venv && source .venv/bin/activate
@@ -13,35 +15,30 @@ cd backend && python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 # Alternative: uv pip install -r requirements.txt
 
-# Start development server with hot reload  
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
-# Vision-only server (no JSON structure required)
+# PRIMARY: Vision-only server (no JSON structure required)
 uvicorn main_vision_only:app --host 0.0.0.0 --port 8001 --reload
+
+# PAUSED: Original system (vision+JSON parsing) - DO NOT EDIT
+# uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
 # IMPORTANT: Do NOT use TEST_MODE when OpenAI API key is available
 # TEST_MODE disables real AI analysis and returns mock responses
-
-# Manual startup (start.sh script not available)
-# Start backend and frontend is served at root /
 ```
 
-### Testing
+### Testing - VISION-ONLY FOCUS
 ```bash
-# Figure analysis API test (primary test suite)
-python "test scripts"/test_figure_analysis.py
-
-# Vision-only analysis test
+# PRIMARY: Vision-only analysis test
 python test_vision_only.py
+
+# PAUSED: Main system tests - DO NOT USE
+# python "test scripts"/test_figure_analysis.py
+# python "test scripts"/test_api.py
+# python "test scripts"/synthetic_data_gen.py --base-url http://localhost:8000 --count 12
+# python "test scripts"/quick_test.py
 
 # Test mode ONLY when no API keys available (disables vision API calls)
 # WARNING: Only use when OPENAI_API_KEY and OPENROUTER_API_KEY are missing
-# TEST_MODE=1 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
-# Legacy tests (from trip planner - for reference)
-python "test scripts"/test_api.py
-python "test scripts"/synthetic_data_gen.py --base-url http://localhost:8000 --count 12
-python "test scripts"/quick_test.py
+# TEST_MODE=1 uvicorn main_vision_only:app --host 0.0.0.0 --port 8001 --reload
 ```
 
 ### Docker
@@ -50,19 +47,23 @@ python "test scripts"/quick_test.py
 docker-compose up --build
 ```
 
-## Architecture Overview
+## Architecture Overview - VISION-ONLY FOCUS
 
 This is the **BioRender Figure Feedback Agent** - an AI-powered system for analyzing and improving scientific figures using a **multi-agent architecture** with parallel execution.
 
-### Core Components
-- **Backend**: FastAPI application (`backend/main.py`) serving both API and static frontend
-- **Vision-Only Backend**: Simplified FastAPI app (`backend/main_vision_only.py`) for image-only analysis
-- **Frontend**: Single-page HTML application with Tailwind CSS (`frontend/index.html`)
+**CURRENT FOCUS: Development is exclusively on the vision-only system. The main system (vision+JSON parsing) is paused.**
+
+### Core Components (Vision-Only Focus)
+- **Vision-Only Backend**: Primary FastAPI app (`backend/main_vision_only.py`) for image-only analysis
 - **Vision-Only Frontend**: Streamlined interface (`frontend/index_vision_only.html`) with drag-and-drop image upload
 - **Multi-Agent System**: 5 specialized LangGraph agents executing in parallel
-- **Figure Processing**: Image and JSON structure analysis capabilities (original) + pure vision analysis (vision-only)
+- **Figure Processing**: Pure vision analysis using GPT-4o
 - **Real-time Progress**: WebSocket support for live agent progress updates
 - **Observability**: Optional Arize/OpenInference tracing
+
+### Paused Components (DO NOT EDIT)
+- **Main Backend**: FastAPI application (`backend/main.py`) - PAUSED
+- **Main Frontend**: Interface (`frontend/index.html`) - PAUSED
 
 ### Multi-Agent System Design
 
