@@ -268,3 +268,102 @@ Jon's scoring framework provides the professional depth needed, but by translati
 
 ### Multi-Agent Reliability
 The distributed agent approach provides better error handling and parallel processing compared to single LLM calls, while the enhanced scoring provides the granular feedback quality that users need.
+
+## Incremental Rollout Plan (Scoring v2)
+
+### Recommendation
+- **Incremental, in-service rollout** with a pluggable scoring engine and feature flags. Use a "shadow" mode to compute v2 alongside v1 on the same requests, compare in Arize, and keep client responses stable until promotion.
+
+### Engine Abstraction
+- Create a small scoring package and a stable interface.
+
+```python
+# backend/scoring/base.py
+from typing import Protocol, Dict, Any, Optional
+
+class ScoringEngine(Protocol):
+    version: str
+    def score(
+        self,
+        visual_text: str,
+        communication_text: str,
+        scientific_text: str,
+        content_summary: str,
+        figure_type: Optional[str] = None,
+    ) -> Dict[str, Any]:  # {overall:int, per_dim:{...}, breakdown:{...}, rationale:str}
+        ...
+```
+
+- Package layout:
+  - `backend/scoring/base.py` – interface
+  - `backend/scoring/v1.py` – adapter for current 0–10 scoring (wrap existing behavior, normalize output)
+  - `backend/scoring/v2.py` – weighted category implementation from this spec
+  - `backend/scoring/__init__.py` – factory and version selection
+
+```python
+# backend/scoring/__init__.py
+import os
+from typing import Optional
+from .v1 import V1Scoring
+from .v2 import V2Scoring
+
+def get_engine(request_override: Optional[str] = None):
+    version = request_override or os.getenv("SCORING_VERSION", "v1")
+    return V2Scoring() if version == "v2" else V1Scoring()
+```
+
+### v2 Weights and Structure
+- Encode the category weights from this document in `v2.py`. Start pragmatic: derive sub-scores via structured LLM JSON output using `content_summary` and agent texts, then aggregate with fixed weights, with strict JSON schema and a deterministic fallback.
+
+```python
+# backend/scoring/v2.py (sketch)
+VISUAL_WEIGHTS = {"layout_flow": 20, "color_contrast": 18, "typography": 16, "arrows_flow": 14, "consistency": 12, "editability": 10, "enhancement": 10}
+COMM_WEIGHTS    = {"core_message": 25, "narrative": 20, "density": 18, "storytelling": 17, "speed": 20}
+SCI_WEIGHTS     = {"relationships": 30, "nomenclature": 20, "pathway_logic": 18, "visual_risks": 16, "literature": 16}
+```
+
+### Wiring into the Synthesizer
+- In `backend/main_vision_only.py` within the synthesizer/aggregation step, select the engine via the factory and set `state["quality_scores"]` to the engine result. Keep existing top-level response fields and add an optional `breakdown` for v2.
+
+```python
+from backend.scoring import get_engine
+
+engine = get_engine(request_override=state.get("scoring_version"))
+scores = engine.score(
+    visual_text=state.get("visual_analysis", ""),
+    communication_text=state.get("communication_analysis", ""),
+    scientific_text=state.get("scientific_analysis", ""),
+    content_summary=state.get("content_interpretation", ""),
+    figure_type=state.get("figure_type"),
+)
+state["quality_scores"] = scores
+```
+
+### Flags, Overrides, and Shadow Mode
+- Env flag: `SCORING_VERSION=v1|v2|shadow`
+- Per-request override: header `X-Scoring-Version: v1|v2|shadow` or query `?scoring_version=v2`
+- Shadow mode behavior: compute both v1 and v2, return v1 to clients, attach v2 results to tracing/logs for comparison.
+
+### Arize/OpenInference Instrumentation
+- On the synthesizer span, attach attributes for comparison to avoid blank detail panes:
+  - `scoring.version`
+  - `scoring.overall_v1`, `scoring.overall_v2`
+  - `scoring.visual_v1`, `scoring.visual_v2`, etc.
+  - Optional: `scoring.breakdown_v2` (compact JSON string) and per-dimension deltas.
+
+### API/UI Compatibility
+- Preserve current response shape. If `breakdown` exists, render a collapsible sub-table; otherwise, show simple scores. No breaking changes required.
+
+### Evaluation and Promotion
+- Run shadow mode for a representative period; export a small diff table (v1 vs v2) and sample for human rating.
+- Promote by flipping `SCORING_VERSION=v2` once deltas and human evals look good.
+
+### When to Consider a Parallel System
+- Only if you need isolated dependencies/runtime, significantly different models/prompts, or infra-level A/B. Otherwise, in-process engines with flags simplify operations and trace correlation.
+
+### Minimal Tasks to Start
+- Extract current scoring into `backend/scoring/v1.py` returning `{overall, per_dim, breakdown?, rationale}`.
+- Implement `v2.py` with weights and strict JSON parsing + fallback.
+- Add factory/flags and request overrides, including a `shadow` mode.
+- Instrument synthesizer span with v1/v2 attributes for side-by-side comparison in Arize.
+- Add a small test that runs both engines on the same inputs and prints a compact diff.

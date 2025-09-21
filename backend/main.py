@@ -41,6 +41,8 @@ try:
     from openinference.instrumentation import using_prompt_template
     from opentelemetry import trace
     from opentelemetry.trace import Status, StatusCode
+    from opentelemetry import context as otel_context
+    from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
     _TRACING = True
     logger.info("Arize AX tracing modules loaded successfully")
 except ImportError as e:
@@ -51,7 +53,32 @@ except ImportError as e:
         def _noop():
             yield
         return _noop()
+
+    # Fallback when tracing not available
+    otel_context = None
+    _SUPPRESS_INSTRUMENTATION_KEY = None
+
     _TRACING = False
+
+# Suppress instrumentation context manager
+from contextlib import contextmanager
+
+@contextmanager
+def suppress_instrumentation():
+    """Suppress OpenTelemetry instrumentation for the duration of this context."""
+    if not _TRACING or not otel_context or not _SUPPRESS_INSTRUMENTATION_KEY:
+        # Tracing disabled or not available, just yield
+        yield
+        return
+
+    # Create context with suppression enabled
+    ctx = otel_context.set_value(_SUPPRESS_INSTRUMENTATION_KEY, True)
+    token = otel_context.attach(ctx)
+
+    try:
+        yield
+    finally:
+        otel_context.detach(token)
 
 # LangGraph + LangChain
 from langgraph.graph import StateGraph, END, START
@@ -280,7 +307,10 @@ Please analyze the image and provide a plain language interpretation."""
     
     # Use vision-capable model
     vision_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, max_tokens=300)
-    response = vision_llm.invoke(messages)
+
+    # Suppress tracing for vision calls to avoid sending large image payloads to Arize
+    with suppress_instrumentation():
+        response = vision_llm.invoke(messages)
     return response.content.strip()
 
 

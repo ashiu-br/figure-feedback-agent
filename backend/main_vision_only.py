@@ -46,6 +46,8 @@ try:
     from openinference.instrumentation import using_prompt_template
     from opentelemetry import trace
     from opentelemetry.trace import Status, StatusCode
+    from opentelemetry import context as otel_context
+    from opentelemetry.context import _SUPPRESS_INSTRUMENTATION_KEY
     _TRACING = True
     logger.info("Arize AX tracing modules loaded successfully")
 except ImportError as e:
@@ -56,7 +58,35 @@ except ImportError as e:
         def _noop():
             yield
         return _noop()
+
+    # Fallback when tracing not available
+    otel_context = None
+    _SUPPRESS_INSTRUMENTATION_KEY = None
+
     _TRACING = False
+
+# Suppress instrumentation context manager
+from contextlib import contextmanager
+
+@contextmanager
+def suppress_instrumentation():
+    """Suppress OpenTelemetry instrumentation for the duration of this context."""
+    if not _TRACING or not otel_context or not _SUPPRESS_INSTRUMENTATION_KEY:
+        # Tracing disabled or not available, just yield
+        yield
+        return
+
+    # Create context with suppression enabled
+    ctx = otel_context.set_value(_SUPPRESS_INSTRUMENTATION_KEY, True)
+    token = otel_context.attach(ctx)
+
+    try:
+        yield
+    finally:
+        otel_context.detach(token)
+
+# Global image cache for session-based storage (reduces Arize payload size)
+IMAGE_CACHE = {}
 
 # LangGraph + LangChain
 from langgraph.graph import StateGraph, END, START
@@ -152,13 +182,17 @@ llm = _init_llm()
 # === VISION-ONLY ANALYSIS TOOLS ===
 
 @tool
-def analyze_visual_design(image_data: str, context: str = "", content_summary: str = "") -> str:
+def analyze_visual_design(session_id: str, context: str = "", content_summary: str = "") -> str:
     """Analyze visual design aspects of the figure using vision-only approach.
-    
+
     Args:
+        session_id: Session identifier to lookup image data from cache
         content_summary: Plain language description of what the figure communicates (from content interpretation)
     """
-    
+
+    # Lookup image data from cache
+    image_data = IMAGE_CACHE.get(session_id, "")
+
     if not image_data or os.getenv("TEST_MODE"):
         return """VISUAL DESIGN ANALYSIS (Score: 8/10):
 
@@ -207,6 +241,7 @@ Provide specific, actionable feedback with a score out of 10. Focus on design pr
         ]
         
         vision_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, max_tokens=500)
+
         response = vision_llm.invoke(messages)
         return f"VISUAL DESIGN ANALYSIS:\n\n{response.content.strip()}"
         
@@ -232,14 +267,18 @@ Provide specific, actionable feedback with a score out of 10. Focus on design pr
 → Consider color-blind friendly palette for accessibility"""
 
 
-@tool 
-def evaluate_communication_clarity(image_data: str, context: str = "", figure_type: str = "", content_summary: str = "") -> str:
+@tool
+def evaluate_communication_clarity(session_id: str, context: str = "", figure_type: str = "", content_summary: str = "") -> str:
     """Evaluate communication clarity using vision-only approach.
-    
+
     Args:
+        session_id: Session identifier to lookup image data from cache
         content_summary: Plain language description of what the figure communicates (from content interpretation)
     """
-    
+
+    # Lookup image data from cache
+    image_data = IMAGE_CACHE.get(session_id, "")
+
     if not image_data or os.getenv("TEST_MODE"):
         return f"""COMMUNICATION CLARITY ANALYSIS (Score: 8/10):
 
@@ -290,6 +329,7 @@ Provide specific feedback with a score out of 10. Focus on how effectively the f
         ]
         
         vision_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, max_tokens=500)
+
         response = vision_llm.invoke(messages)
         return f"COMMUNICATION CLARITY ANALYSIS:\n\n{response.content.strip()}"
         
@@ -318,13 +358,17 @@ Provide specific feedback with a score out of 10. Focus on how effectively the f
 
 
 @tool
-def validate_scientific_accuracy(image_data: str, context: str = "", figure_type: str = "", content_summary: str = "") -> str:
+def validate_scientific_accuracy(session_id: str, context: str = "", figure_type: str = "", content_summary: str = "") -> str:
     """Validate scientific accuracy using vision-only approach.
-    
+
     Args:
+        session_id: Session identifier to lookup image data from cache
         content_summary: Plain language description of what the figure communicates (from content interpretation)
     """
-    
+
+    # Lookup image data from cache
+    image_data = IMAGE_CACHE.get(session_id, "")
+
     if not image_data or os.getenv("TEST_MODE"):
         return """SCIENTIFIC ACCURACY ANALYSIS (Score: 9/10):
 
@@ -379,6 +423,7 @@ Provide specific feedback with a score out of 10. Focus on scientific validity a
         ]
         
         vision_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, max_tokens=500)
+
         response = vision_llm.invoke(messages)
         return f"SCIENTIFIC ACCURACY ANALYSIS:\n\n{response.content.strip()}"
         
@@ -412,9 +457,16 @@ Provide specific feedback with a score out of 10. Focus on scientific validity a
 
 
 @tool
-def interpret_figure_content(image_data: str, context: str = "", figure_type: str = "") -> str:
-    """Generate a plain language summary using vision LLM."""
-    
+def interpret_figure_content(session_id: str, context: str = "", figure_type: str = "") -> str:
+    """Generate a plain language summary using vision LLM.
+
+    Args:
+        session_id: Session identifier to lookup image data from cache
+    """
+
+    # Lookup image data from cache
+    image_data = IMAGE_CACHE.get(session_id, "")
+
     if not image_data or os.getenv("TEST_MODE"):
         return f"This figure appears to be a {figure_type or 'scientific diagram'} showing biological or scientific relationships. {context or 'The figure illustrates key concepts and processes within its domain.'}"
     
@@ -452,6 +504,7 @@ Please analyze the image and provide a plain language interpretation."""
         ]
         
         vision_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, max_tokens=300)
+
         response = vision_llm.invoke(messages)
         return response.content.strip()
     except Exception as e:
@@ -460,8 +513,7 @@ Please analyze the image and provide a plain language interpretation."""
 
 
 @tool
-def synthesize_feedback(visual_analysis: str, communication_analysis: str, scientific_analysis: str, 
-                       image_data: str = "") -> str:
+def synthesize_feedback(visual_analysis: str, communication_analysis: str, scientific_analysis: str) -> str:
     """Synthesize all agent analyses into prioritized, actionable feedback with overall scores."""
     
     # Extract scores from analyses
@@ -647,7 +699,7 @@ async def visual_design_agent(state: FigureState):
     content_summary = state.get("content_interpretation", "")
     
     analysis = analyze_visual_design.invoke({
-        "image_data": state["image_data"],
+        "session_id": state.get("session_id", ""),
         "context": state.get("context", ""),
         "content_summary": content_summary
     })
@@ -700,7 +752,7 @@ async def communication_agent(state: FigureState):
     content_summary = state.get("content_interpretation", "")
     
     analysis = evaluate_communication_clarity.invoke({
-        "image_data": state["image_data"],
+        "session_id": state.get("session_id", ""),
         "context": state.get("context", ""),
         "figure_type": state.get("figure_type", ""),
         "content_summary": content_summary
@@ -754,7 +806,7 @@ async def scientific_agent(state: FigureState):
     content_summary = state.get("content_interpretation", "")
     
     analysis = validate_scientific_accuracy.invoke({
-        "image_data": state["image_data"],
+        "session_id": state.get("session_id", ""),
         "context": state.get("context", ""),
         "figure_type": state.get("figure_type", ""),
         "content_summary": content_summary
@@ -829,7 +881,7 @@ async def content_interpretation_step(state: FigureState):
     
     # Direct call to content interpretation (vision-only, no JSON structure)
     interpretation = interpret_figure_content.invoke({
-        "image_data": state["image_data"],
+        "session_id": state.get("session_id", ""),
         "context": state.get("context", ""),
         "figure_type": state.get("figure_type", "")
     })
@@ -881,8 +933,7 @@ async def feedback_synthesizer_agent(state: FigureState):
     feedback = synthesize_feedback.invoke({
         "visual_analysis": state["visual_analysis"],
         "communication_analysis": state["communication_analysis"],
-        "scientific_analysis": state["scientific_analysis"],
-        "image_data": state["image_data"]
+        "scientific_analysis": state["scientific_analysis"]
     })
     
     # Extract scores for response
@@ -1120,18 +1171,23 @@ async def analyze_figure_with_websocket(request: FigureAnalysisRequest, session_
     return await _analyze_figure_internal(request, websocket, session_id)
 
 
-async def _analyze_figure_internal(request: FigureAnalysisRequest, websocket: Any = None, session_id: str = None):
+async def _analyze_figure_internal(request: FigureAnalysisRequest, websocket: Any = None, session_id: Optional[str] = None):
     """Internal function to analyze figure with optional WebSocket support."""
     start_time = time.time()
-    
+
     try:
         logger.info(f"Starting vision-only figure analysis - figure_type: {request.figure_type}, context length: {len(request.context or '')}")
-        
+
+        # Generate session_id if not provided (for non-WebSocket requests)
+        if not session_id:
+            session_id = str(uuid.uuid4())
+            logger.info(f"Generated session_id for analysis: {session_id}")
+
         graph = build_graph()
-        
+
         # Initialize state with WebSocket support - Vision Only
         initial_state: FigureState = {
-            "image_data": request.image_data,
+            "image_data": f"[CACHED:{session_id}]",  # Reference instead of 400KB+ base64 payload
             "context": request.context,
             "figure_type": request.figure_type,
             "visual_analysis": None,
@@ -1142,8 +1198,12 @@ async def _analyze_figure_internal(request: FigureAnalysisRequest, websocket: An
             "quality_scores": None,
             "agent_progress": {},
             "websocket": websocket,
-            "session_id": session_id
+            "session_id": session_id  # Now always a valid string
         }
+
+        # Store image data in cache to avoid sending large base64 payloads to Arize
+        # session_id is now guaranteed to be a valid string
+        IMAGE_CACHE[session_id] = request.image_data
         
         logger.info("Invoking LangGraph workflow...")
         
@@ -1231,7 +1291,7 @@ async def _analyze_figure_upload_internal(
     context: str,
     figure_type: str,
     websocket: Any = None,
-    session_id: str = None
+    session_id: Optional[str] = None
 ):
     """Internal function to handle file upload and analysis - Vision Only."""
     try:
