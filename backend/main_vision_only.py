@@ -895,7 +895,16 @@ Based on this comprehensive description, provide focused visual design analysis 
             ]
 
             text_llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.3, max_tokens=600)
-            response = text_llm.invoke(messages)
+
+            with using_prompt_template(
+                template=system_prompt,
+                variables={
+                    "context": state.get("context", "Scientific figure analysis"),
+                    "detailed_description": detailed_description[:500] + "..." if len(detailed_description) > 500 else detailed_description,
+                },
+                version="v2-visual-design-text-v1.0",
+            ):
+                response = text_llm.invoke(messages)
             analysis = f"VISUAL DESIGN ANALYSIS:\n\n{response.content.strip()}"
 
             logger.info("Visual design: V2 text-only analysis completed")
@@ -1012,7 +1021,17 @@ Based on this comprehensive description, provide focused communication effective
             ]
 
             text_llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.3, max_tokens=600)
-            response = text_llm.invoke(messages)
+
+            with using_prompt_template(
+                template=system_prompt,
+                variables={
+                    "context": state.get("context", "Scientific figure analysis"),
+                    "figure_type": state.get("figure_type", "general"),
+                    "detailed_description": detailed_description[:500] + "..." if len(detailed_description) > 500 else detailed_description,
+                },
+                version="v2-communication-text-v1.0",
+            ):
+                response = text_llm.invoke(messages)
             analysis = f"COMMUNICATION CLARITY ANALYSIS:\n\n{response.content.strip()}"
 
             logger.info("Communication: V2 text-only analysis completed")
@@ -1130,7 +1149,17 @@ Based on this comprehensive description, provide focused scientific accuracy ana
             ]
 
             text_llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.3, max_tokens=600)
-            response = text_llm.invoke(messages)
+
+            with using_prompt_template(
+                template=system_prompt,
+                variables={
+                    "context": state.get("context", "Scientific figure analysis"),
+                    "figure_type": state.get("figure_type", "general"),
+                    "detailed_description": detailed_description[:500] + "..." if len(detailed_description) > 500 else detailed_description,
+                },
+                version="v2-scientific-text-v1.0",
+            ):
+                response = text_llm.invoke(messages)
             analysis = f"SCIENTIFIC ACCURACY ANALYSIS:\n\n{response.content.strip()}"
 
             logger.info("Scientific: V2 text-only analysis completed")
@@ -1289,7 +1318,16 @@ Please provide comprehensive detailed analysis followed by human-readable summar
             ]
 
             vision_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, max_tokens=2000)
-            response = vision_llm.invoke(messages)
+
+            with using_prompt_template(
+                template=system_prompt,
+                variables={
+                    "context": state.get("context", "Scientific figure analysis"),
+                    "figure_type": state.get("figure_type", "general"),
+                },
+                version="v2-comprehensive-vision-v1.0",
+            ):
+                response = vision_llm.invoke(messages)
             full_response = response.content.strip()
 
             # Extract detailed description and human summary
