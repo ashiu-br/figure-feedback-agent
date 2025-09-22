@@ -537,6 +537,20 @@ Action: Standardize all element labels to size 12pt, pathway names to 14pt bold,
     try:
         system_prompt = """You are an expert scientific figure consultant. Based on the provided analyses, generate exactly 3 specific, actionable recommendations that the user can immediately implement.
 
+CONTEXT: {context}
+
+CONTENT SUMMARY:
+{content_interpretation}
+
+VISUAL DESIGN ANALYSIS:
+{visual_analysis}
+
+COMMUNICATION ANALYSIS:
+{communication_analysis}
+
+SCIENTIFIC ANALYSIS:
+{scientific_analysis}
+
 Each recommendation must follow this exact format:
 
 RECOMMENDATION X (Priority: HIGH/MEDIUM/LOW - Category)
@@ -554,36 +568,35 @@ Requirements:
 
 Generate exactly 3 recommendations, prioritized by impact."""
 
-        user_prompt = f"""Content Summary: {content_interpretation}
-
-Visual Design Analysis:
-{visual_analysis}
-
-Communication Analysis:
-{communication_analysis}
-
-Scientific Analysis:
-{scientific_analysis}
-
-Context: {context or 'Scientific figure analysis'}
-
-Please generate 3 specific, actionable recommendations based on the most critical issues identified across all analyses."""
+        user_prompt = "Please generate 3 specific, actionable recommendations based on the most critical issues identified across all analyses."
 
         llm_local = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, max_tokens=600)
 
+        # Truncate variables for tracing (avoid token overflow in traces)
+        template_variables = {
+            "content_interpretation": content_interpretation[:200] + "..." if len(content_interpretation) > 200 else content_interpretation,
+            "visual_analysis": visual_analysis[:300] + "..." if len(visual_analysis) > 300 else visual_analysis,
+            "communication_analysis": communication_analysis[:300] + "..." if len(communication_analysis) > 300 else communication_analysis,
+            "scientific_analysis": scientific_analysis[:300] + "..." if len(scientific_analysis) > 300 else scientific_analysis,
+            "context": context or 'Scientific figure analysis',
+        }
+
+        # Format the system prompt with actual values for the LLM call
+        formatted_system_prompt = system_prompt.format(**{
+            "content_interpretation": content_interpretation,
+            "visual_analysis": visual_analysis,
+            "communication_analysis": communication_analysis,
+            "scientific_analysis": scientific_analysis,
+            "context": context or 'Scientific figure analysis',
+        })
+
         with using_prompt_template(
-            template=system_prompt,
-            variables={
-                "content_interpretation": content_interpretation[:200] + "..." if len(content_interpretation) > 200 else content_interpretation,
-                "visual_analysis": visual_analysis[:300] + "..." if len(visual_analysis) > 300 else visual_analysis,
-                "communication_analysis": communication_analysis[:300] + "..." if len(communication_analysis) > 300 else communication_analysis,
-                "scientific_analysis": scientific_analysis[:300] + "..." if len(scientific_analysis) > 300 else scientific_analysis,
-                "context": context,
-            },
+            template=system_prompt,  # Template with placeholders for tracing
+            variables=template_variables,  # Variables for tracing
             version="recommendations-v1.0",
         ):
             response = llm_local.invoke([
-                SystemMessage(content=system_prompt),
+                SystemMessage(content=formatted_system_prompt),  # Formatted content for LLM
                 HumanMessage(content=user_prompt),
             ])
 
@@ -706,7 +719,10 @@ def evaluate_scientific_coherence(description: str, context: str = "", figure_ty
 
     system_prompt = (
         "You are a rigorous scientific reviewer focusing on conceptual coherence.\n\n"
-        "Task: Evaluate whether a scientific description is coherent and logically sound using a 3-level system.\n\n"
+        "CONTEXT: {context}\n"
+        "FIGURE TYPE: {figure_type}\n\n"
+        "DESCRIPTION TO EVALUATE:\n{description}\n\n"
+        "Task: Evaluate whether this scientific description is coherent and logically sound using a 3-level system.\n\n"
         "Analyze for:\n"
         "1. Internal Consistency: Do the concepts flow logically from one to another?\n"
         "2. Conceptual Appropriateness: Are different scientific concepts meaningfully connected?\n"
@@ -724,26 +740,33 @@ def evaluate_scientific_coherence(description: str, context: str = "", figure_ty
         "Be critical and avoid hand-waving."
     )
 
-    user_prompt = (
-        f"Description:\n{description}\n\n"
-        f"Context: {context or 'Scientific figure'}\n"
-        f"Figure Type: {figure_type or 'general'}"
-    )
+    user_prompt = "Please evaluate the coherence of the description provided above."
 
     try:
         llm_local = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, max_tokens=500)
+        
+        # Prepare variables for tracing
+        template_variables = {
+            "description": (description[:500] + "...") if len(description) > 500 else description,
+            "context": context or 'Scientific figure',
+            "figure_type": figure_type or 'general',
+        }
+        
+        # Format system prompt with actual values
+        formatted_system_prompt = system_prompt.format(
+            description=description,
+            context=context or 'Scientific figure',
+            figure_type=figure_type or 'general'
+        )
+        
         # Track template for Arize/OpenInference to separate template vs variables
         with using_prompt_template(
-            template=system_prompt,
-            variables={
-                "description": (description[:500] + "...") if len(description) > 500 else description,
-                "context": context,
-                "figure_type": figure_type,
-            },
+            template=system_prompt,  # Template with placeholders
+            variables=template_variables,  # Variables for tracing
             version="coherence-v2.0",
         ):
             response = llm_local.invoke([
-                SystemMessage(content=system_prompt),
+                SystemMessage(content=formatted_system_prompt),  # Formatted content
                 HumanMessage(content=user_prompt),
             ])
         return response.content.strip()
@@ -869,6 +892,11 @@ async def visual_design_agent(state: FigureState):
         try:
             system_prompt = """You are an expert in scientific figure visual design. Based on the comprehensive image description provided, analyze the visual design aspects and provide specific feedback.
 
+CONTEXT: {context}
+
+DETAILED IMAGE DESCRIPTION:
+{detailed_description}
+
 Evaluate:
 1. Color palette effectiveness and accessibility
 2. Typography and text hierarchy clarity
@@ -882,26 +910,30 @@ VISUAL DESIGN ANALYSIS (Score: X/10):
 
 [Your detailed analysis with specific recommendations]"""
 
-            user_prompt = f"""Context: {state.get("context", "Scientific figure analysis")}
+            user_prompt = "Based on the comprehensive description provided above, provide focused visual design analysis and scoring."
 
-Detailed Image Description:
-{detailed_description}
-
-Based on this comprehensive description, provide focused visual design analysis and scoring."""
+            # Prepare variables for tracing
+            template_variables = {
+                "context": state.get("context", "Scientific figure analysis"),
+                "detailed_description": detailed_description[:500] + "..." if len(detailed_description) > 500 else detailed_description,
+            }
+            
+            # Format system prompt with actual values
+            formatted_system_prompt = system_prompt.format(
+                context=state.get("context", "Scientific figure analysis"),
+                detailed_description=detailed_description
+            )
 
             messages = [
-                SystemMessage(content=system_prompt),
+                SystemMessage(content=formatted_system_prompt),
                 HumanMessage(content=user_prompt)
             ]
 
             text_llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.3, max_tokens=600)
 
             with using_prompt_template(
-                template=system_prompt,
-                variables={
-                    "context": state.get("context", "Scientific figure analysis"),
-                    "detailed_description": detailed_description[:500] + "..." if len(detailed_description) > 500 else detailed_description,
-                },
+                template=system_prompt,  # Template with placeholders
+                variables=template_variables,  # Variables for tracing
                 version="v2-visual-design-text-v1.0",
             ):
                 response = text_llm.invoke(messages)
@@ -994,6 +1026,12 @@ async def communication_agent(state: FigureState):
         try:
             system_prompt = """You are an expert in scientific communication. Based on the comprehensive image description provided, evaluate the communication effectiveness.
 
+CONTEXT: {context}
+FIGURE TYPE: {figure_type}
+
+DETAILED IMAGE DESCRIPTION:
+{detailed_description}
+
 Evaluate:
 1. Information flow and logical sequence
 2. Information density and cognitive load
@@ -1007,28 +1045,32 @@ COMMUNICATION CLARITY ANALYSIS (Score: X/10):
 
 [Your detailed analysis with specific recommendations]"""
 
-            user_prompt = f"""Context: {state.get("context", "Scientific figure analysis")}
-Figure Type: {state.get("figure_type", "general")}
+            user_prompt = "Based on the comprehensive description provided above, provide focused communication effectiveness analysis and scoring."
 
-Detailed Image Description:
-{detailed_description}
-
-Based on this comprehensive description, provide focused communication effectiveness analysis and scoring."""
+            # Prepare variables for tracing
+            template_variables = {
+                "context": state.get("context", "Scientific figure analysis"),
+                "figure_type": state.get("figure_type", "general"),
+                "detailed_description": detailed_description[:500] + "..." if len(detailed_description) > 500 else detailed_description,
+            }
+            
+            # Format system prompt with actual values
+            formatted_system_prompt = system_prompt.format(
+                context=state.get("context", "Scientific figure analysis"),
+                figure_type=state.get("figure_type", "general"),
+                detailed_description=detailed_description
+            )
 
             messages = [
-                SystemMessage(content=system_prompt),
+                SystemMessage(content=formatted_system_prompt),
                 HumanMessage(content=user_prompt)
             ]
 
             text_llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.3, max_tokens=600)
 
             with using_prompt_template(
-                template=system_prompt,
-                variables={
-                    "context": state.get("context", "Scientific figure analysis"),
-                    "figure_type": state.get("figure_type", "general"),
-                    "detailed_description": detailed_description[:500] + "..." if len(detailed_description) > 500 else detailed_description,
-                },
+                template=system_prompt,  # Template with placeholders
+                variables=template_variables,  # Variables for tracing
                 version="v2-communication-text-v1.0",
             ):
                 response = text_llm.invoke(messages)
@@ -1122,6 +1164,12 @@ async def scientific_agent(state: FigureState):
         try:
             system_prompt = """You are a scientific expert. Based on the comprehensive image description provided, validate the scientific accuracy.
 
+CONTEXT: {context}
+FIGURE TYPE: {figure_type}
+
+DETAILED IMAGE DESCRIPTION:
+{detailed_description}
+
 Evaluate:
 1. Scientific nomenclature and terminology accuracy
 2. Biological/scientific pathway logic and relationships
@@ -1135,28 +1183,32 @@ SCIENTIFIC ACCURACY ANALYSIS (Score: X/10):
 
 [Your detailed analysis with specific recommendations]"""
 
-            user_prompt = f"""Context: {state.get("context", "Scientific figure analysis")}
-Figure Type: {state.get("figure_type", "general")}
+            user_prompt = "Based on the comprehensive description provided above, provide focused scientific accuracy analysis and scoring."
 
-Detailed Image Description:
-{detailed_description}
-
-Based on this comprehensive description, provide focused scientific accuracy analysis and scoring."""
+            # Prepare variables for tracing
+            template_variables = {
+                "context": state.get("context", "Scientific figure analysis"),
+                "figure_type": state.get("figure_type", "general"),
+                "detailed_description": detailed_description[:500] + "..." if len(detailed_description) > 500 else detailed_description,
+            }
+            
+            # Format system prompt with actual values
+            formatted_system_prompt = system_prompt.format(
+                context=state.get("context", "Scientific figure analysis"),
+                figure_type=state.get("figure_type", "general"),
+                detailed_description=detailed_description
+            )
 
             messages = [
-                SystemMessage(content=system_prompt),
+                SystemMessage(content=formatted_system_prompt),
                 HumanMessage(content=user_prompt)
             ]
 
             text_llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.3, max_tokens=600)
 
             with using_prompt_template(
-                template=system_prompt,
-                variables={
-                    "context": state.get("context", "Scientific figure analysis"),
-                    "figure_type": state.get("figure_type", "general"),
-                    "detailed_description": detailed_description[:500] + "..." if len(detailed_description) > 500 else detailed_description,
-                },
+                template=system_prompt,  # Template with placeholders
+                variables=template_variables,  # Variables for tracing
                 version="v2-scientific-text-v1.0",
             ):
                 response = text_llm.invoke(messages)
@@ -1270,6 +1322,9 @@ async def content_interpretation_step(state: FigureState):
 
             system_prompt = """You are an expert scientific figure analyst. Analyze this image comprehensively and provide TWO outputs in this EXACT format:
 
+CONTEXT: {context}
+FIGURE TYPE: {figure_type}
+
 DETAILED ANALYSIS:
 [Provide extensive, technical description covering ALL aspects:]
 
@@ -1296,10 +1351,7 @@ HUMAN SUMMARY:
 
 IMPORTANT: You MUST include both the "DETAILED ANALYSIS:" and "HUMAN SUMMARY:" section headers exactly as shown above."""
 
-            context_text = f"""Context: {state.get("context", "Scientific figure analysis")}
-Figure Type: {state.get("figure_type", "general")}
-
-Please provide comprehensive detailed analysis followed by human-readable summary."""
+            context_text = "Please provide comprehensive detailed analysis followed by human-readable summary."
 
             try:
                 if os.getenv("PUBLIC_BASE_URL"):
@@ -1309,8 +1361,17 @@ Please provide comprehensive detailed analysis followed by human-readable summar
             except Exception:
                 image_ref = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
 
+            # Prepare variables for tracing
+            template_variables = {
+                "context": state.get("context", "Scientific figure analysis"),
+                "figure_type": state.get("figure_type", "general"),
+            }
+
+            # Format system prompt with actual values
+            formatted_system_prompt = system_prompt.format(**template_variables)
+
             messages = [
-                SystemMessage(content=system_prompt),
+                SystemMessage(content=formatted_system_prompt),
                 HumanMessage(content=[
                     {"type": "text", "text": context_text},
                     image_ref,
@@ -1320,11 +1381,8 @@ Please provide comprehensive detailed analysis followed by human-readable summar
             vision_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, max_tokens=2000)
 
             with using_prompt_template(
-                template=system_prompt,
-                variables={
-                    "context": state.get("context", "Scientific figure analysis"),
-                    "figure_type": state.get("figure_type", "general"),
-                },
+                template=system_prompt,  # Template with placeholders
+                variables=template_variables,  # Variables for tracing
                 version="v2-comprehensive-vision-v1.0",
             ):
                 response = vision_llm.invoke(messages)
