@@ -111,15 +111,15 @@ class FigureAnalysisRequest(BaseModel):
 
 class FigureAnalysisResponse(BaseModel):
     visual_design_score: int
-    communication_score: int  
+    communication_score: int
     scientific_accuracy_score: int
     overall_score: int
     content_summary: str
     feedback: str
     recommendations: List[Dict[str, Any]]
     processing_time: float
-    # Experimental: scientific coherence signal (1-5) and rationale
-    scientific_coherence_score: Optional[int] = None
+    # Scientific coherence 3-level system (HIGH/MEDIUM/LOW) and rationale
+    scientific_coherence_level: Optional[str] = None
     scientific_coherence_reason: Optional[str] = None
 
 
@@ -688,46 +688,42 @@ Action: Cross-reference terminology and ensure adherence to field standards."""
 
 @tool
 def evaluate_scientific_coherence(description: str, context: str = "", figure_type: str = "") -> str:
-    """Evaluate whether the scientific description is conceptually coherent.
+    """Evaluate whether the scientific description is conceptually coherent using 3-level system.
 
     Returns a structured text block including:
-    - COHERENT/INCOHERENT: <value>
-    - Primary Issue: <short phrase>
+    - COHERENCE_LEVEL: HIGH/MEDIUM/LOW
+    - Primary Issue: <short phrase if not HIGH>
     - Specific Problems: <bulleted or comma-separated list>
-    - Missing Links: (lines starting with → for actionable recommendations)
-    - Coherence Rating (1-5): <number>
-    - Reason: <one sentence>
+    - Reason: <one sentence explanation>
     """
     if not description or os.getenv("TEST_MODE"):
         return (
-            "COHERENT/INCOHERENT: COHERENT\n"
+            "COHERENCE_LEVEL: HIGH\n"
             "Primary Issue: None\n"
             "Specific Problems: None\n"
-            "Missing Links:\n"
-            "→ No gaps identified\n"
-            "Coherence Rating (1-5): 4\n"
             "Reason: Concepts align at the same level and flow logically."
         )
 
-    # Move evaluation instructions into the system message for clearer observability
     system_prompt = (
         "You are a rigorous scientific reviewer focusing on conceptual coherence.\n\n"
-        "Task: Evaluate whether a scientific description is coherent and logically sound.\n\n"
+        "Task: Evaluate whether a scientific description is coherent and logically sound using a 3-level system.\n\n"
         "Analyze for:\n"
-        "1. Internal Consistency: Do the concepts flow logically from one to another? Are the connections between ideas justified?\n"
-        "2. Conceptual Appropriateness: Are different scientific concepts being combined in a meaningful way, or are unrelated concepts being artificially connected?\n"
-        "3. Technical Accuracy: Are the scientific methods/concepts being described correctly for their intended purpose?\n"
-        "4. Scope Alignment: Do all elements belong at the same level of analysis (e.g., molecular techniques with molecular questions, policy frameworks with policy questions)?\n\n"
-        "Provide a structured assessment strictly in this order:\n"
-        "- COHERENT/INCOHERENT: [Binary judgment]\n"
-        "- Primary Issue (if incoherent): [short phrase]\n"
-        "- Specific Problems: [list disconnects]\n"
-        "- Missing Links: [what needs to be explained]\n"
-        "- Coherence Rating (1-5): [single integer]\n"
-        "- Reason: [one sentence explaining the rating]\n\n"
+        "1. Internal Consistency: Do the concepts flow logically from one to another?\n"
+        "2. Conceptual Appropriateness: Are different scientific concepts meaningfully connected?\n"
+        "3. Technical Accuracy: Are the scientific methods/concepts described correctly?\n"
+        "4. Scope Alignment: Do all elements belong at the same level of analysis?\n\n"
+        "Classification:\n"
+        "- HIGH: Concepts flow logically, relationships are clear and justified, no significant gaps\n"
+        "- MEDIUM: Generally coherent with minor gaps or unclear connections that don't undermine the overall logic\n"
+        "- LOW: Major logical inconsistencies, disconnected concepts, or confusing relationships that significantly undermine scientific validity\n\n"
+        "Provide assessment in this exact format:\n"
+        "- COHERENCE_LEVEL: [HIGH/MEDIUM/LOW]\n"
+        "- Primary Issue: [short phrase or 'None' if HIGH]\n"
+        "- Specific Problems: [list main issues or 'None' if HIGH]\n"
+        "- Reason: [one sentence explaining the classification]\n\n"
         "Be critical and avoid hand-waving."
     )
-    # User message only carries inputs
+
     user_prompt = (
         f"Description:\n{description}\n\n"
         f"Context: {context or 'Scientific figure'}\n"
@@ -744,8 +740,8 @@ def evaluate_scientific_coherence(description: str, context: str = "", figure_ty
                 "context": context,
                 "figure_type": figure_type,
             },
-            version="coherence-v1.0",
-        ): 
+            version="coherence-v2.0",
+        ):
             response = llm_local.invoke([
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt),
@@ -754,14 +750,74 @@ def evaluate_scientific_coherence(description: str, context: str = "", figure_ty
     except Exception as e:
         logger.warning(f"Coherence evaluation failed: {e}")
         return (
-            "COHERENT/INCOHERENT: INCOHERENT\n"
+            "COHERENCE_LEVEL: LOW\n"
             "Primary Issue: Unable to evaluate coherence\n"
             "Specific Problems: Evaluation error\n"
-            "Missing Links:\n"
-            "→ Provide a clear chain of reasoning between concepts\n"
-            "Coherence Rating (1-5): 2\n"
             "Reason: Automatic fallback due to evaluation error."
         )
+
+
+def calculate_coherence_penalty(coherence_level: str) -> int:
+    """Calculate penalty points based on coherence level.
+
+    Args:
+        coherence_level: HIGH, MEDIUM, or LOW
+
+    Returns:
+        Penalty points to subtract from scientific accuracy score
+    """
+    coherence_level = coherence_level.upper().strip()
+
+    penalty_map = {
+        "HIGH": 0,     # No penalty
+        "MEDIUM": 3,   # Moderate penalty
+        "LOW": 7       # Severe penalty
+    }
+
+    return penalty_map.get(coherence_level, 7)  # Default to severe penalty for unknown levels
+
+
+def extract_score_from_analysis(analysis_text: str) -> int:
+    """Extract score from analysis text like 'Score: 8/10'.
+
+    Args:
+        analysis_text: Text containing score pattern
+
+    Returns:
+        Extracted score or 8 as default
+    """
+    score_match = re.search(r'Score:\s*(\d+)(?:/10)?', analysis_text, re.IGNORECASE)
+    if score_match:
+        return int(score_match.group(1))
+    return 8  # Default score
+
+
+def update_analysis_score(analysis_text: str, new_score: int) -> str:
+    """Update the score in analysis text.
+
+    Args:
+        analysis_text: Original analysis text
+        new_score: New score to replace existing score
+
+    Returns:
+        Updated analysis text with new score
+    """
+    # Update score in formats like "Score: 8/10" or "Score: 8"
+    updated_text = re.sub(
+        r'(Score:\s*)(\d+)(/10)?',
+        rf'\g<1>{new_score}\g<3>',
+        analysis_text,
+        flags=re.IGNORECASE
+    )
+
+    # If no score pattern found, add score to beginning
+    if not re.search(r'Score:\s*\d+', analysis_text, re.IGNORECASE):
+        if analysis_text.startswith("SCIENTIFIC ACCURACY ANALYSIS"):
+            updated_text = f"SCIENTIFIC ACCURACY ANALYSIS (Score: {new_score}/10):\n\n{analysis_text.split(':', 1)[1] if ':' in analysis_text else analysis_text}"
+        else:
+            updated_text = f"SCIENTIFIC ACCURACY ANALYSIS (Score: {new_score}/10):\n\n{analysis_text}"
+
+    return updated_text
 
 async def visual_design_agent(state: FigureState):
     """Agent focused on visual design analysis with thinking simulation."""
@@ -1115,44 +1171,42 @@ Based on this comprehensive description, provide focused scientific accuracy ana
         "figure_type": state.get("figure_type", ""),
     })
 
-    # Parse a 1-5 rating and one-sentence reason
-    coherence_score = None
+    # Parse coherence level and apply penalty to scientific accuracy score
+    coherence_level = "HIGH"  # Default
     coherence_reason = None
     try:
-        # Flexible rating extraction: handle hyphen/en dash/em dash and label variations
-        rating_patterns = [
-            r"Coherence\s*(?:Rating|Score)?\s*\(\s*1\s*[-–—]\s*5\s*\)\s*:\s*([1-5])",
-            r"\bRating\b\s*:\s*([1-5])",
-            r"\bScore\b\s*:\s*([1-5])",
-        ]
-        for pat in rating_patterns:
-            m = re.search(pat, coherence_block, re.IGNORECASE)
-            if m:
-                coherence_score = int(m.group(1))
-                break
+        # Extract coherence level (HIGH/MEDIUM/LOW)
+        level_match = re.search(r"COHERENCE_LEVEL:\s*(\w+)", coherence_block, re.IGNORECASE)
+        if level_match:
+            coherence_level = level_match.group(1).strip().upper()
 
-        # Fallback from binary judgment if explicit rating missing
-        if coherence_score is None:
-            j = re.search(r"COHERENT/INCOHERENT\s*:\s*(\w+)", coherence_block, re.IGNORECASE)
-            if j:
-                val = j.group(1).strip().lower()
-                coherence_score = 2 if val.startswith("incoherent") else 4
-
-        # Reason line
-        mr = re.search(r"Reason\s*:\s*(.+)", coherence_block, re.IGNORECASE)
-        if mr:
-            coherence_reason = mr.group(1).strip()
+        # Extract reason
+        reason_match = re.search(r"Reason:\s*(.+)", coherence_block, re.IGNORECASE)
+        if reason_match:
+            coherence_reason = reason_match.group(1).strip()
         else:
             # Fallback to primary issue as reason if present
-            pi = re.search(r"Primary\s*Issue\s*:\s*(.+)", coherence_block, re.IGNORECASE)
-            if pi:
-                coherence_reason = pi.group(1).strip()
+            issue_match = re.search(r"Primary\s*Issue:\s*(.+)", coherence_block, re.IGNORECASE)
+            if issue_match and issue_match.group(1).strip().lower() != "none":
+                coherence_reason = issue_match.group(1).strip()
 
         # Trim reason if overly long
         if coherence_reason and len(coherence_reason) > 240:
             coherence_reason = coherence_reason[:237] + "..."
-    except Exception:
-        pass
+
+        # Apply coherence penalty to scientific accuracy score
+        original_score = extract_score_from_analysis(analysis)
+        penalty = calculate_coherence_penalty(coherence_level)
+        adjusted_score = max(1, original_score - penalty)  # Minimum score of 1
+
+        if penalty > 0:
+            logger.info(f"Scientific: Applied coherence penalty - {coherence_level} coherence reduces score from {original_score} to {adjusted_score} (-{penalty})")
+            analysis = update_analysis_score(analysis, adjusted_score)
+        else:
+            logger.info(f"Scientific: No coherence penalty - {coherence_level} coherence maintains score at {original_score}")
+
+    except Exception as e:
+        logger.warning(f"Coherence penalty calculation failed: {e}")
 
     combined = f"{analysis}\n\nConceptual Coherence Check:\n{coherence_block}"
     
@@ -1163,8 +1217,8 @@ Based on this comprehensive description, provide focused scientific accuracy ana
     await send_progress(state, "agent_complete", agent_name, "Scientific accuracy validation completed", "complete")
     
     result: Dict[str, Any] = {"scientific_analysis": combined}
-    if coherence_score is not None:
-        result["scientific_coherence_score"] = coherence_score
+    # Store coherence level as string for response (HIGH/MEDIUM/LOW)
+    result["scientific_coherence_level"] = coherence_level
     if coherence_reason:
         result["scientific_coherence_reason"] = coherence_reason
     return result
@@ -1185,9 +1239,10 @@ async def content_interpretation_step(state: FigureState):
             # V2: Single comprehensive vision call for detailed description
             logger.info("V2: Making single vision call for comprehensive detailed description")
 
-            system_prompt = """You are an expert scientific figure analyst. Analyze this image comprehensively and provide TWO outputs:
+            system_prompt = """You are an expert scientific figure analyst. Analyze this image comprehensively and provide TWO outputs in this EXACT format:
 
-1. DETAILED ANALYSIS: An extensive, technical description covering ALL aspects that would be needed for thorough evaluation:
+DETAILED ANALYSIS:
+[Provide extensive, technical description covering ALL aspects:]
 
 VISUAL ELEMENTS:
 - Specific colors used (mention hex codes if identifiable), color palette assessment
@@ -1207,9 +1262,10 @@ SCIENTIFIC CONTENT:
 - Process logic: temporal sequences, mechanism validity, logical flow
 - Standards: adherence to field conventions, potential accuracy issues
 
-2. HUMAN SUMMARY: A concise 2-3 sentence summary for general understanding.
+HUMAN SUMMARY:
+[Write a concise 2-3 sentence summary that describes what this figure shows and its main message in plain language that anyone can understand.]
 
-Be extremely detailed in section 1 - this will be used by specialists for in-depth analysis without seeing the image."""
+IMPORTANT: You MUST include both the "DETAILED ANALYSIS:" and "HUMAN SUMMARY:" section headers exactly as shown above."""
 
             context_text = f"""Context: {state.get("context", "Scientific figure analysis")}
 Figure Type: {state.get("figure_type", "general")}
@@ -1242,9 +1298,29 @@ Please provide comprehensive detailed analysis followed by human-readable summar
                 detailed_description = parts[0].strip()
                 human_summary = parts[1].strip() if len(parts) > 1 else "Comprehensive analysis completed."
             else:
-                # Fallback parsing
+                # Better fallback - try to extract a meaningful summary from the response
                 detailed_description = full_response
-                human_summary = "This figure presents scientific information with visual and technical components for analysis."
+
+                # Try to find any descriptive content about what the figure shows
+                lines = full_response.split('\n')
+                potential_summary = None
+
+                for line in lines:
+                    line = line.strip()
+                    if any(starter in line.lower() for starter in ['this figure', 'the figure', 'this diagram', 'the diagram', 'this image', 'shows', 'illustrates', 'demonstrates', 'depicts']):
+                        potential_summary = line
+                        break
+
+                if potential_summary:
+                    human_summary = potential_summary
+                else:
+                    # Last resort - generate a basic summary from available context
+                    figure_type = state.get("figure_type", "scientific diagram")
+                    context_info = state.get("context", "")
+                    if context_info:
+                        human_summary = f"This {figure_type} presents {context_info.lower()} with scientific information and analysis components."
+                    else:
+                        human_summary = f"This {figure_type} shows scientific concepts and relationships for analysis and understanding."
 
             logger.info(f"V2: Generated detailed description ({len(detailed_description)} chars) and summary ({len(human_summary)} chars)")
 
@@ -1684,9 +1760,9 @@ async def _analyze_figure_internal(request: FigureAnalysisRequest, websocket: An
                     })
         
         scores = result.get("quality_scores", {})
-        coherence_score = result.get("scientific_coherence_score")
+        coherence_level = result.get("scientific_coherence_level")
         coherence_reason = result.get("scientific_coherence_reason")
-        
+
         return FigureAnalysisResponse(
             visual_design_score=scores.get("visual_design", 8),
             communication_score=scores.get("communication", 8),
@@ -1696,7 +1772,7 @@ async def _analyze_figure_internal(request: FigureAnalysisRequest, websocket: An
             feedback=feedback_text,
             recommendations=recommendations,
             processing_time=processing_time,
-            scientific_coherence_score=coherence_score,
+            scientific_coherence_level=coherence_level,
             scientific_coherence_reason=coherence_reason
         )
         
