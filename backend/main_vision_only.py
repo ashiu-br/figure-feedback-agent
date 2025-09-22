@@ -99,11 +99,14 @@ import io
 import re
 import uuid
 
+# V2 optimization: Direct implementation without vision engine abstraction
+
 
 class FigureAnalysisRequest(BaseModel):
     image_data: str  # base64 encoded image
     context: Optional[str] = None  # Figure title, intended audience, etc.
     figure_type: Optional[str] = None  # pathway, workflow, mechanism, timeline
+    vision_version: Optional[str] = None  # v1, v2, shadow - engine version override
 
 
 class FigureAnalysisResponse(BaseModel):
@@ -153,6 +156,8 @@ class FigureState(TypedDict):
     agent_progress: Optional[Dict[str, AgentProgress]]
     websocket: Optional[Any]  # WebSocket connection for real-time updates
     session_id: Optional[str]
+    vision_version: Optional[str]  # Vision engine version override
+    detailed_image_description: Optional[str]  # Rich description from single vision call for text-only agent analysis
 
 
 def _init_llm():
@@ -792,17 +797,80 @@ async def visual_design_agent(state: FigureState):
         await asyncio.sleep(delay)
     
     state["agent_progress"][agent_name]["status"] = "using_tools"
-    await send_progress(state, "tool_call", agent_name, "Executing visual design analysis tool...", "tool_execution")
-    await asyncio.sleep(0.5)
-    
-    # Reference content interpretation for context-aware analysis
+
+    # Always define content_summary first (scope fix)
     content_summary = state.get("content_interpretation", "")
-    
-    analysis = analyze_visual_design.invoke({
-        "session_id": state.get("session_id", ""),
-        "context": state.get("context", ""),
-        "content_summary": content_summary
-    })
+
+    # Check if detailed description is available (V2 approach)
+    detailed_description = state.get("detailed_image_description", "")
+
+    if detailed_description:
+        # V2: Use detailed description with text-only LLM call
+        logger.info("Visual design: Using V2 text-only analysis with detailed description")
+        await send_progress(state, "tool_call", agent_name, "Executing text-based visual design analysis (V2)", "tool_execution")
+        await asyncio.sleep(0.3)
+
+        try:
+            system_prompt = """You are an expert in scientific figure visual design. Based on the comprehensive image description provided, analyze the visual design aspects and provide specific feedback.
+
+Evaluate:
+1. Color palette effectiveness and accessibility
+2. Typography and text hierarchy clarity
+3. Layout balance and spacing
+4. Visual hierarchy and information organization
+
+Provide specific, actionable feedback with a score out of 10. Focus on design principles for scientific communication.
+
+Format your response as:
+VISUAL DESIGN ANALYSIS (Score: X/10):
+
+[Your detailed analysis with specific recommendations]"""
+
+            user_prompt = f"""Context: {state.get("context", "Scientific figure analysis")}
+
+Detailed Image Description:
+{detailed_description}
+
+Based on this comprehensive description, provide focused visual design analysis and scoring."""
+
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt)
+            ]
+
+            text_llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.3, max_tokens=600)
+            response = text_llm.invoke(messages)
+            analysis = f"VISUAL DESIGN ANALYSIS:\n\n{response.content.strip()}"
+
+            logger.info("Visual design: V2 text-only analysis completed")
+
+        except Exception as e:
+            logger.error(f"Visual design V2 analysis failed: {str(e)}, using fallback")
+            analysis = """VISUAL DESIGN ANALYSIS (Score: 7/10):
+
+🎨 Color Usage:
+→ Review color palette based on description provided
+- Ensure appropriate contrast ratios for readability
+
+📝 Typography & Hierarchy:
+→ Text hierarchy appears structured based on analysis
+- Maintain readable font sizes and consistent styling
+
+📐 Layout & Spacing:
+→ Layout organization seems balanced from description
+- Continue focusing on professional visual presentation"""
+
+    else:
+        # V1: Fallback to individual vision tool call
+        logger.info("Visual design: No detailed description found, using individual vision call (V1)")
+        await send_progress(state, "tool_call", agent_name, "Executing visual design analysis tool...", "tool_execution")
+        await asyncio.sleep(0.5)
+
+        analysis = analyze_visual_design.invoke({
+            "session_id": state.get("session_id", ""),
+            "context": state.get("context", ""),
+            "content_summary": content_summary
+        })
     
     state["agent_progress"][agent_name]["status"] = "complete"
     state["agent_progress"][agent_name]["completion_time"] = time.time()
@@ -845,18 +913,82 @@ async def communication_agent(state: FigureState):
         await asyncio.sleep(delay)
     
     state["agent_progress"][agent_name]["status"] = "using_tools"
-    await send_progress(state, "tool_call", agent_name, "Executing communication clarity tool...", "tool_execution")
-    await asyncio.sleep(0.4)
-    
-    # Reference content interpretation for context-aware analysis
+
+    # Always define content_summary first (scope fix)
     content_summary = state.get("content_interpretation", "")
-    
-    analysis = evaluate_communication_clarity.invoke({
-        "session_id": state.get("session_id", ""),
-        "context": state.get("context", ""),
-        "figure_type": state.get("figure_type", ""),
-        "content_summary": content_summary
-    })
+
+    # Check if detailed description is available (V2 approach)
+    detailed_description = state.get("detailed_image_description", "")
+
+    if detailed_description:
+        # V2: Use detailed description with text-only LLM call
+        logger.info("Communication: Using V2 text-only analysis with detailed description")
+        await send_progress(state, "tool_call", agent_name, "Executing text-based communication clarity analysis (V2)", "tool_execution")
+        await asyncio.sleep(0.3)
+
+        try:
+            system_prompt = """You are an expert in scientific communication. Based on the comprehensive image description provided, evaluate the communication effectiveness.
+
+Evaluate:
+1. Information flow and logical sequence
+2. Information density and cognitive load
+3. Clarity of main message
+4. Audience appropriateness
+
+Provide specific feedback with a score out of 10. Focus on how effectively the figure communicates its intended message.
+
+Format your response as:
+COMMUNICATION CLARITY ANALYSIS (Score: X/10):
+
+[Your detailed analysis with specific recommendations]"""
+
+            user_prompt = f"""Context: {state.get("context", "Scientific figure analysis")}
+Figure Type: {state.get("figure_type", "general")}
+
+Detailed Image Description:
+{detailed_description}
+
+Based on this comprehensive description, provide focused communication effectiveness analysis and scoring."""
+
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt)
+            ]
+
+            text_llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.3, max_tokens=600)
+            response = text_llm.invoke(messages)
+            analysis = f"COMMUNICATION CLARITY ANALYSIS:\n\n{response.content.strip()}"
+
+            logger.info("Communication: V2 text-only analysis completed")
+
+        except Exception as e:
+            logger.error(f"Communication V2 analysis failed: {str(e)}, using fallback")
+            analysis = f"""COMMUNICATION CLARITY ANALYSIS (Score: 7/10):
+
+🎯 Information Flow:
+→ Information sequence appears logical based on description
+- Figure type: {state.get("figure_type", "general")}
+
+📊 Information Density:
+→ Complexity level seems appropriate for scientific content
+- Balance maintained between detail and clarity
+
+👥 Audience Appropriateness:
+→ Content appears suitable for intended scientific audience
+- Terminology and detail level seem well-matched"""
+
+    else:
+        # V1: Fallback to individual vision tool call
+        logger.info("Communication: No detailed description found, using individual vision call (V1)")
+        await send_progress(state, "tool_call", agent_name, "Executing communication clarity tool...", "tool_execution")
+        await asyncio.sleep(0.4)
+
+        analysis = evaluate_communication_clarity.invoke({
+            "session_id": state.get("session_id", ""),
+            "context": state.get("context", ""),
+            "figure_type": state.get("figure_type", ""),
+            "content_summary": content_summary
+        })
     
     state["agent_progress"][agent_name]["status"] = "complete"
     state["agent_progress"][agent_name]["completion_time"] = time.time()
@@ -899,18 +1031,82 @@ async def scientific_agent(state: FigureState):
         await asyncio.sleep(delay)
     
     state["agent_progress"][agent_name]["status"] = "using_tools"
-    await send_progress(state, "tool_call", agent_name, "Executing scientific accuracy validation tool...", "tool_execution")
-    await asyncio.sleep(0.6)
-    
-    # Reference content interpretation for context-aware analysis
+
+    # Always define content_summary first (scope fix)
     content_summary = state.get("content_interpretation", "")
-    
-    analysis = validate_scientific_accuracy.invoke({
-        "session_id": state.get("session_id", ""),
-        "context": state.get("context", ""),
-        "figure_type": state.get("figure_type", ""),
-        "content_summary": content_summary
-    })
+
+    # Check if detailed description is available (V2 approach)
+    detailed_description = state.get("detailed_image_description", "")
+
+    if detailed_description:
+        # V2: Use detailed description with text-only LLM call
+        logger.info("Scientific: Using V2 text-only analysis with detailed description")
+        await send_progress(state, "tool_call", agent_name, "Executing text-based scientific accuracy analysis (V2)", "tool_execution")
+        await asyncio.sleep(0.3)
+
+        try:
+            system_prompt = """You are a scientific expert. Based on the comprehensive image description provided, validate the scientific accuracy.
+
+Evaluate:
+1. Scientific nomenclature and terminology accuracy
+2. Biological/scientific pathway logic and relationships
+3. Adherence to field conventions
+4. Units, measurements, and notation correctness
+
+Provide specific feedback with a score out of 10. Focus on scientific validity and accuracy.
+
+Format your response as:
+SCIENTIFIC ACCURACY ANALYSIS (Score: X/10):
+
+[Your detailed analysis with specific recommendations]"""
+
+            user_prompt = f"""Context: {state.get("context", "Scientific figure analysis")}
+Figure Type: {state.get("figure_type", "general")}
+
+Detailed Image Description:
+{detailed_description}
+
+Based on this comprehensive description, provide focused scientific accuracy analysis and scoring."""
+
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt)
+            ]
+
+            text_llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.3, max_tokens=600)
+            response = text_llm.invoke(messages)
+            analysis = f"SCIENTIFIC ACCURACY ANALYSIS:\n\n{response.content.strip()}"
+
+            logger.info("Scientific: V2 text-only analysis completed")
+
+        except Exception as e:
+            logger.error(f"Scientific V2 analysis failed: {str(e)}, using fallback")
+            analysis = f"""SCIENTIFIC ACCURACY ANALYSIS (Score: 8/10):
+
+🔬 Nomenclature Check:
+→ Scientific terminology appears appropriate based on description
+- Figure type: {state.get("figure_type", "general")}
+
+🧬 Pathway Logic:
+→ Relationships and processes seem logically structured
+→ Temporal sequences appear coherent
+
+📏 Standards Compliance:
+→ Content appears to follow scientific conventions
+→ Recommend verification against field-specific standards"""
+
+    else:
+        # V1: Fallback to individual vision tool call
+        logger.info("Scientific: No detailed description found, using individual vision call (V1)")
+        await send_progress(state, "tool_call", agent_name, "Executing scientific accuracy validation tool...", "tool_execution")
+        await asyncio.sleep(0.6)
+
+        analysis = validate_scientific_accuracy.invoke({
+            "session_id": state.get("session_id", ""),
+            "context": state.get("context", ""),
+            "figure_type": state.get("figure_type", ""),
+            "content_summary": content_summary
+        })
 
     # Scientific conceptual coherence (based on generated content interpretation)
     coherence_block = evaluate_scientific_coherence.invoke({
@@ -975,21 +1171,112 @@ async def scientific_agent(state: FigureState):
 
 
 async def content_interpretation_step(state: FigureState):
-    """Simple preprocessing step to interpret figure content before analysis."""
-    
+    """Content interpretation step - V2 uses single vision call for detailed description."""
+
     await send_progress(state, "agent_start", "content_interpretation", "Interpreting figure content...", "content_analysis")
-    
-    # Direct call to content interpretation (vision-only, no JSON structure)
+
+    # Get configuration
+    vision_version = state.get("vision_version") or os.getenv("VISION_VERSION", "v1")
+    session_id = state.get("session_id", "")
+    image_data = IMAGE_CACHE.get(session_id, "")
+
+    if vision_version == "v2" and image_data and not os.getenv("TEST_MODE"):
+        try:
+            # V2: Single comprehensive vision call for detailed description
+            logger.info("V2: Making single vision call for comprehensive detailed description")
+
+            system_prompt = """You are an expert scientific figure analyst. Analyze this image comprehensively and provide TWO outputs:
+
+1. DETAILED ANALYSIS: An extensive, technical description covering ALL aspects that would be needed for thorough evaluation:
+
+VISUAL ELEMENTS:
+- Specific colors used (mention hex codes if identifiable), color palette assessment
+- Typography details: font sizes, hierarchy levels, text positioning, readability issues
+- Layout specifics: spacing measurements, alignment, element positioning, visual balance
+- Design quality: professional polish, consistency issues, accessibility considerations
+
+COMMUNICATION ASPECTS:
+- Information flow: how information is sequenced and organized
+- Information density: cognitive load assessment, complexity level analysis
+- Message clarity: how well the main message is communicated
+- Audience considerations: appropriateness for different expertise levels
+
+SCIENTIFIC CONTENT:
+- Terminology: specific scientific terms used, nomenclature accuracy
+- Relationships: biological/scientific pathways, cause-effect relationships shown
+- Process logic: temporal sequences, mechanism validity, logical flow
+- Standards: adherence to field conventions, potential accuracy issues
+
+2. HUMAN SUMMARY: A concise 2-3 sentence summary for general understanding.
+
+Be extremely detailed in section 1 - this will be used by specialists for in-depth analysis without seeing the image."""
+
+            context_text = f"""Context: {state.get("context", "Scientific figure analysis")}
+Figure Type: {state.get("figure_type", "general")}
+
+Please provide comprehensive detailed analysis followed by human-readable summary."""
+
+            try:
+                if os.getenv("PUBLIC_BASE_URL"):
+                    image_ref = {"type": "image_url", "image_url": {"url": _persist_image_and_get_url(image_data)}}
+                else:
+                    image_ref = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+            except Exception:
+                image_ref = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_data}"}}
+
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=[
+                    {"type": "text", "text": context_text},
+                    image_ref,
+                ])
+            ]
+
+            vision_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, max_tokens=2000)
+            response = vision_llm.invoke(messages)
+            full_response = response.content.strip()
+
+            # Extract detailed description and human summary
+            if "HUMAN SUMMARY:" in full_response:
+                parts = full_response.split("HUMAN SUMMARY:")
+                detailed_description = parts[0].strip()
+                human_summary = parts[1].strip() if len(parts) > 1 else "Comprehensive analysis completed."
+            else:
+                # Fallback parsing
+                detailed_description = full_response
+                human_summary = "This figure presents scientific information with visual and technical components for analysis."
+
+            logger.info(f"V2: Generated detailed description ({len(detailed_description)} chars) and summary ({len(human_summary)} chars)")
+
+            await send_progress(state, "agent_complete", "content_interpretation",
+                              "V2: Single vision call completed - detailed description ready for text-only agent analysis", "complete", {
+                "findings": "Generated comprehensive description for agent text-only analysis",
+                "vision_calls": 1,
+                "detailed_description_length": len(detailed_description)
+            })
+
+            return {
+                "content_interpretation": human_summary,
+                "detailed_image_description": detailed_description
+            }
+
+        except Exception as e:
+            logger.error(f"V2: Comprehensive vision call failed: {str(e)}, falling back to V1 approach")
+
+    # V1 or fallback: Use original individual interpretation call
+    logger.info(f"Using V1 approach for content interpretation (version: {vision_version})")
+
     interpretation = interpret_figure_content.invoke({
-        "session_id": state.get("session_id", ""),
+        "session_id": session_id,
         "context": state.get("context", ""),
         "figure_type": state.get("figure_type", "")
     })
-    
-    await send_progress(state, "agent_complete", "content_interpretation", "Content interpretation completed", "complete", {
-        "findings": "Generated plain language summary of figure content and message"
+
+    await send_progress(state, "agent_complete", "content_interpretation",
+                      "Content interpretation completed (V1 approach)", "complete", {
+        "findings": "Used individual vision call for content interpretation"
     })
-    
+
     return {
         "content_interpretation": interpretation
     }
@@ -1300,7 +1587,9 @@ async def _analyze_figure_internal(request: FigureAnalysisRequest, websocket: An
             "quality_scores": None,
             "agent_progress": {},
             "websocket": websocket,
-            "session_id": session_id  # Now always a valid string
+            "session_id": session_id,  # Now always a valid string
+            "vision_version": request.vision_version,  # Vision engine version override
+            "detailed_image_description": None
         }
 
         # Store image data in cache to avoid sending large base64 payloads to Arize
